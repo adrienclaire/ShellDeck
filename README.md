@@ -43,7 +43,7 @@ bash install-macos.sh
 - Shows the public key and tells you how to copy it to the remote host.
 - Adds SSH hosts to `~/.ssh/config`.
 - Stores infra hosts in `~/.shell-alias-tools/infra-hosts.csv`.
-- Tracks one host with many exposed service addresses.
+- Tracks one host with many exposed service ports.
 
 ## Main Commands
 
@@ -93,28 +93,28 @@ bash install.sh --skip-infra
 The host setup flow is:
 
 ```text
-Host alias
-Host IPv4
+Host alias (default: server1)
+Host IPv4 (example: 192.168.1.X)
 SSH access? yes/no
-  SSH user
+  SSH user (default: admin)
   SSH port
   Add to ~/.ssh/config? yes/no
 Docker on this host? yes/no
-Service address? yes/no
-  http://paperless.home.arpa
-  192.168.1.187:8000
+Service port? yes/no
+  8000
+  8222
 ```
 
 Hosts are stored as CSV:
 
 ```csv
 Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services
-proxmox,192.168.1.185,true,root,22,true,true,http://paperless.home.arpa;http://192.168.1.187:8000
+server1,192.168.1.187,true,admin,22,true,true,http://192.168.1.187:8000;http://192.168.1.187:8222
 ```
 
 If Docker is enabled and the host has SSH access, `init` will run `docker ps` over SSH and print exposed container URLs. It uses the SSH config alias when available, otherwise it connects with `ssh -p <port> <user>@<ip>`.
 
-Service addresses can be URLs or host:port values. Host:port values are normalized with `http://` before saving.
+When adding a service to a host, enter only the port. For host `192.168.1.187`, entering `8000` saves `http://192.168.1.187:8000`.
 
 ## macOS Notes
 

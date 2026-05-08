@@ -627,13 +627,13 @@ add_infra_host() {
   local hosts_file="$INSTALL_DIR/infra-hosts.csv"
   local tmp
 
-  name="$(read_validated "Host alias" "$name" valid_name "Use a host alias like proxmox, docker-vm, or app01. Letters, numbers, dot, dash, underscore; start with a letter.")"
-  host="$(read_validated "Host IPv4" "$host" valid_ipv4 "This is not an IPv4 address. Example: 192.168.1.185.")"
-  user="$(read_validated "SSH user" "$user" valid_user "Use a simple SSH user, like root, ubuntu, admin, or adrien.")"
+  name="$(read_validated "Host alias" "$name" valid_name "Use a host alias like server1, docker-vm, or app01. Letters, numbers, dot, dash, underscore; start with a letter.")"
+  host="$(read_validated "Host IPv4, example 192.168.1.X" "$host" valid_ipv4 "This is not an IPv4 address. Example: 192.168.1.187.")"
+  user="$(read_validated "SSH user" "$user" valid_user "Use a simple SSH user, like admin, ubuntu, or deploy.")"
   port="$(read_validated "SSH port" "$port" valid_port "This is not a valid TCP port. Use a number from 1 to 65535.")"
   role="$(read_validated "Role" "$role" valid_role "Role cannot be empty and cannot contain commas.")"
   check_ports="$(read_ports "Ports to check, semicolon separated" "$check_ports")"
-  url="$(read_validated "Web URL, optional" "$url" valid_url "Use a full URL like https://192.168.1.185:8006, or leave it empty.")"
+  url="$(read_validated "Web URL, optional" "$url" valid_url "Use a full URL like http://192.168.1.187:8000, or leave it empty.")"
 
   if prompt_yes_no "Add this host to ~/.ssh/config?" "yes"; then
     ssh_enabled="true"
@@ -696,9 +696,9 @@ main() {
 
   ok "Install complete."
   printf "\nIMPORTANT: restart your terminal to apply the effect.\n"
-  printf "For this current terminal only, reload your profile with:\n"
+  printf "Run this now to reload your current shell profile:\n"
   printf "  source \"%s\"\n" "$(printf "%s\n" "$profile_list" | sed -n '1p')"
-  printf "Or load the runtime directly with:\n"
+  printf "If that profile file is not the one your shell uses, load the runtime directly:\n"
   printf "  source \"%s/shell-tools.sh\"\n" "$INSTALL_DIR"
   printf "\nThen try:\n"
   printf "  init\n"
