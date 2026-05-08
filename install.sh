@@ -76,6 +76,9 @@ prompt_yes_no() {
   local default="${2:-yes}"
   local suffix
   local answer
+  local tty="/dev/tty"
+
+  [ -r "$tty" ] || tty=""
 
   if [ "$ASSUME_YES" -eq 1 ]; then
     [ "$default" = "yes" ]
@@ -89,8 +92,13 @@ prompt_yes_no() {
   fi
 
   while true; do
-    printf "%s [%s]: " "$prompt" "$suffix"
-    read -r answer
+    if [ -n "$tty" ]; then
+      printf "%s [%s]: " "$prompt" "$suffix" > "$tty"
+      IFS= read -r answer < "$tty"
+    else
+      printf "%s [%s]: " "$prompt" "$suffix"
+      IFS= read -r answer
+    fi
     answer="$(printf "%s" "$answer" | tr '[:upper:]' '[:lower:]')"
 
     if [ -z "$answer" ]; then
@@ -110,6 +118,9 @@ read_default() {
   local prompt="$1"
   local default="$2"
   local answer
+  local tty="/dev/tty"
+
+  [ -r "$tty" ] || tty=""
 
   if [ "$ASSUME_YES" -eq 1 ]; then
     printf "%s" "$default"
@@ -117,12 +128,22 @@ read_default() {
   fi
 
   if [ -n "$default" ]; then
-    printf "%s [%s]: " "$prompt" "$default" >&2
-    read -r answer
+    if [ -n "$tty" ]; then
+      printf "%s [%s]: " "$prompt" "$default" > "$tty"
+      IFS= read -r answer < "$tty"
+    else
+      printf "%s [%s]: " "$prompt" "$default" >&2
+      IFS= read -r answer
+    fi
     printf "%s" "${answer:-$default}"
   else
-    printf "%s: " "$prompt" >&2
-    read -r answer
+    if [ -n "$tty" ]; then
+      printf "%s: " "$prompt" > "$tty"
+      IFS= read -r answer < "$tty"
+    else
+      printf "%s: " "$prompt" >&2
+      IFS= read -r answer
+    fi
     printf "%s" "$answer"
   fi
 }
@@ -266,7 +287,7 @@ copy_runtime() {
   chmod 644 "$INSTALL_DIR/shell-tools.sh"
   [ -f "$INSTALL_DIR/aliases.sh" ] || : > "$INSTALL_DIR/aliases.sh"
   if [ ! -f "$INSTALL_DIR/infra-hosts.csv" ]; then
-    printf "Name,HostName,User,Port,Role,CheckPorts,Url,SshEnabled\n" > "$INSTALL_DIR/infra-hosts.csv"
+    printf "Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services\n" > "$INSTALL_DIR/infra-hosts.csv"
   fi
 }
 
@@ -422,6 +443,8 @@ install_dependencies() {
   local manager=""
   local tool
   local default
+  local required_tools="git ssh curl fzf jq nc"
+  local optional_tools="gh docker multipass"
 
   if [ "$os" = "linux" ]; then
     manager="$(detect_linux_package_manager)"
@@ -430,7 +453,32 @@ install_dependencies() {
     fi
   fi
 
-  for tool in git ssh curl fzf jq nc gh docker multipass; do
+  for tool in $required_tools; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      ok "$tool already installed."
+      continue
+    fi
+
+    if ! prompt_yes_no "Install required dependency '$tool'?" "yes"; then
+      warn "$tool is required for the best Shell Alias Tools experience. Some commands may fall back or fail."
+      continue
+    fi
+
+    case "$os" in
+      linux)
+        if [ -z "$manager" ]; then
+          warn "No supported package manager found. Please install $tool manually."
+        else
+          install_linux_dependency "$tool" "$manager" || warn "Could not install $tool automatically."
+        fi
+        ;;
+      macos)
+        install_macos_dependency "$tool" || warn "Could not install $tool automatically."
+        ;;
+    esac
+  done
+
+  for tool in $optional_tools; do
     if command -v "$tool" >/dev/null 2>&1; then
       ok "$tool already installed."
       continue
@@ -441,7 +489,7 @@ install_dependencies() {
       docker|multipass) default="no" ;;
     esac
 
-    if ! prompt_yes_no "Install missing dependency '$tool'?" "$default"; then
+    if ! prompt_yes_no "Install optional dependency '$tool'?" "$default"; then
       continue
     fi
 
@@ -584,16 +632,20 @@ configure_infra() {
   local hosts_file="$INSTALL_DIR/infra-hosts.csv"
   local host_count
 
+  export SHELL_TOOLS_NO_DASHBOARD=1
+  # shellcheck disable=SC1091
+  . "$INSTALL_DIR/shell-tools.sh"
+
   host_count="$(tail -n +2 "$hosts_file" 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
 
   if [ "$host_count" = "0" ]; then
-    if prompt_yes_no "Add your default Proxmox host at 192.168.1.185?" "yes"; then
-      add_infra_host "proxmox" "192.168.1.185" "root" "22" "proxmox" "22;8006" "https://192.168.1.185:8006"
+    if prompt_yes_no "Configure your first infra host now?" "yes"; then
+      infra-add
     fi
   fi
 
   while prompt_yes_no "Add another infra server?" "no"; do
-    add_infra_host "server" "192.168.1.10" "$(id -un)" "22" "server" "22" ""
+    infra-add
   done
 }
 

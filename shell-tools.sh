@@ -31,8 +31,26 @@ shell-tools-ensure-home() {
   mkdir -p "$SHELL_ALIAS_TOOLS_HOME" "$HOME/.ssh" 2>/dev/null || true
   [ -f "$ALIAS_TOOLS_FILE" ] || : > "$ALIAS_TOOLS_FILE"
   if [ ! -f "$INFRA_HOSTS_FILE" ]; then
-    printf "Name,HostName,User,Port,Role,CheckPorts,Url,SshEnabled\n" > "$INFRA_HOSTS_FILE"
+    printf "Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services\n" > "$INFRA_HOSTS_FILE"
+  elif head -n 1 "$INFRA_HOSTS_FILE" 2>/dev/null | grep -q '^Name,HostName,User,Port,Role,CheckPorts,Url,SshEnabled$'; then
+    _shell_tools_migrate_infra_hosts
   fi
+}
+
+_shell_tools_migrate_infra_hosts() {
+  local tmp="${INFRA_HOSTS_FILE}.tmp.$$"
+
+  {
+    printf "Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services\n"
+    tail -n +2 "$INFRA_HOSTS_FILE" 2>/dev/null |
+      awk -F, 'NF >= 8 {
+        docker = ($5 ~ /[Dd]ocker/) ? "true" : "false"
+        services = $7
+        print $1 "," $2 "," $8 "," $3 "," $4 "," $8 "," docker "," services
+      }'
+  } > "$tmp"
+
+  mv "$tmp" "$INFRA_HOSTS_FILE"
 }
 
 shell-tools-ensure-home
@@ -185,14 +203,27 @@ _shell_tools_read_default() {
   local prompt="$1"
   local default="$2"
   local answer
+  local tty="/dev/tty"
+
+  [ -r "$tty" ] || tty=""
 
   if [ -n "$default" ]; then
-    printf "%s [%s]: " "$prompt" "$default" >&2
-    read -r answer
+    if [ -n "$tty" ]; then
+      printf "%s [%s]: " "$prompt" "$default" > "$tty"
+      IFS= read -r answer < "$tty"
+    else
+      printf "%s [%s]: " "$prompt" "$default" >&2
+      IFS= read -r answer
+    fi
     printf "%s" "${answer:-$default}"
   else
-    printf "%s: " "$prompt" >&2
-    read -r answer
+    if [ -n "$tty" ]; then
+      printf "%s: " "$prompt" > "$tty"
+      IFS= read -r answer < "$tty"
+    else
+      printf "%s: " "$prompt" >&2
+      IFS= read -r answer
+    fi
     printf "%s" "$answer"
   fi
 }
@@ -202,6 +233,9 @@ _shell_tools_yes_no() {
   local default="${2:-yes}"
   local suffix
   local answer
+  local tty="/dev/tty"
+
+  [ -r "$tty" ] || tty=""
 
   if [ "$default" = "yes" ]; then
     suffix="Y/n"
@@ -210,8 +244,13 @@ _shell_tools_yes_no() {
   fi
 
   while true; do
-    printf "%s [%s]: " "$prompt" "$suffix" >&2
-    read -r answer
+    if [ -n "$tty" ]; then
+      printf "%s [%s]: " "$prompt" "$suffix" > "$tty"
+      IFS= read -r answer < "$tty"
+    else
+      printf "%s [%s]: " "$prompt" "$suffix" >&2
+      IFS= read -r answer
+    fi
     answer="$(printf "%s" "$answer" | tr '[:upper:]' '[:lower:]')"
 
     if [ -z "$answer" ]; then
@@ -253,6 +292,33 @@ _shell_tools_valid_role() {
 
 _shell_tools_valid_url() {
   [ -z "$1" ] || printf "%s" "$1" | grep -Eq '^https?://[^[:space:],]+$'
+}
+
+_shell_tools_valid_service_address() {
+  local value="$1"
+  local port
+
+  [ -n "$value" ] || return 1
+  case "$value" in
+    *","*|*";"*|*[[:space:]]*) return 1 ;;
+  esac
+
+  case "$value" in
+    http://*|https://*) printf "%s" "$value" | grep -Eq '^https?://[^/:]+(:[0-9]{1,5})?(/.*)?$' ;;
+    *:*) printf "%s" "$value" | grep -Eq '^[A-Za-z0-9._-]+:[0-9]{1,5}(/.*)?$' ;;
+    *) printf "%s" "$value" | grep -Eq '^[A-Za-z0-9._-]+$' ;;
+  esac || return 1
+
+  port="$(_shell_tools_service_port "$value")"
+  _shell_tools_valid_port "$port"
+}
+
+_shell_tools_normalize_service_address() {
+  local value="$1"
+  case "$value" in
+    http://*|https://*) printf "%s" "$value" ;;
+    *) printf "http://%s" "$value" ;;
+  esac
 }
 
 _shell_tools_valid_port() {
@@ -354,6 +420,46 @@ _shell_tools_csv_safe() {
   esac
 }
 
+_shell_tools_read_services() {
+  local existing="${1:-}"
+  local services=""
+  local address
+  local normalized
+
+  if [ -n "$existing" ]; then
+    printf "\nExisting service addresses:\n" >&2
+    printf "%s" "$existing" | tr ';' '\n' | sed 's/^/  - /' >&2
+    if _shell_tools_yes_no "Keep these service addresses?" "yes"; then
+      printf "%s" "$existing"
+      return 0
+    fi
+  fi
+
+  if ! _shell_tools_yes_no "Do you want to add a service address?" "yes"; then
+    printf ""
+    return 0
+  fi
+
+  while true; do
+    address="$(_shell_tools_read_default "Service address, example http://paperless.home.arpa or 192.168.1.187:8000" "")"
+    if _shell_tools_valid_service_address "$address"; then
+      normalized="$(_shell_tools_normalize_service_address "$address")"
+      if [ -z "$services" ]; then
+        services="$normalized"
+      else
+        services="$services;$normalized"
+      fi
+    else
+      echo "This is not a valid service address. Use http://paperless.home.arpa or 192.168.1.187:8000." >&2
+      continue
+    fi
+
+    _shell_tools_yes_no "Add another service address?" "no" || break
+  done
+
+  printf "%s" "$services"
+}
+
 _shell_tools_host_exists() {
   local name="$1"
   [ -f "$INFRA_HOSTS_FILE" ] && awk -F, -v host="$name" 'NR > 1 && $1 == host { found = 1 } END { exit found ? 0 : 1 }' "$INFRA_HOSTS_FILE"
@@ -362,12 +468,12 @@ _shell_tools_host_exists() {
 _shell_tools_save_infra_record() {
   local name="$1"
   local host="$2"
-  local user="$3"
-  local port="$4"
-  local role="$5"
-  local check_ports="$6"
-  local url="$7"
-  local ssh_enabled="$8"
+  local ssh_enabled="$3"
+  local user="$4"
+  local port="$5"
+  local in_ssh_config="$6"
+  local docker="$7"
+  local services="$8"
   local old_name="${9:-}"
   local tmp
 
@@ -375,7 +481,7 @@ _shell_tools_save_infra_record() {
   tmp="${INFRA_HOSTS_FILE}.tmp.$$"
   awk -F, -v host="$name" -v old="$old_name" 'NR == 1 || ($1 != host && (old == "" || $1 != old))' "$INFRA_HOSTS_FILE" > "$tmp" 2>/dev/null || true
   mv "$tmp" "$INFRA_HOSTS_FILE"
-  printf "%s,%s,%s,%s,%s,%s,%s,%s\n" "$name" "$host" "$user" "$port" "$role" "$check_ports" "$url" "$ssh_enabled" >> "$INFRA_HOSTS_FILE"
+  printf "%s,%s,%s,%s,%s,%s,%s,%s\n" "$name" "$host" "$ssh_enabled" "$user" "$port" "$in_ssh_config" "$docker" "$services" >> "$INFRA_HOSTS_FILE"
 }
 
 _shell_tools_add_ssh_config() {
@@ -479,57 +585,52 @@ _shell_tools_ensure_ssh_key() {
 infra-add() {
   local name="${1:-}"
   local host="${2:-}"
-  local user="${3:-}"
-  local port="${4:-22}"
-  local role="${5:-}"
-  local check_ports="${6:-}"
-  local url="${7:-}"
-  local ssh_enabled="true"
-  local tmp
+  local ssh_enabled="false"
+  local user=""
+  local port=""
+  local in_ssh_config="false"
+  local docker="false"
+  local services=""
 
   shell-tools-ensure-home
   printf "\n%sInfra host onboarding%s\n" "$ST_CYAN" "$ST_RESET"
 
   name="$(_shell_tools_resolve_validated "$name" "Host alias" "proxmox" _shell_tools_valid_name "Use a host alias like proxmox, docker-vm, or app01. Letters, numbers, dot, dash, underscore; start with a letter.")"
   host="$(_shell_tools_resolve_validated "$host" "Host IPv4" "192.168.1.185" _shell_tools_valid_ipv4 "This is not an IPv4 address. Example: 192.168.1.185.")"
-  user="$(_shell_tools_resolve_validated "$user" "SSH user" "root" _shell_tools_valid_user "Use a simple SSH user, like root, ubuntu, admin, or adrien.")"
-  port="$(_shell_tools_resolve_validated "$port" "SSH port" "22" _shell_tools_valid_port "This is not a valid TCP port. Use a number from 1 to 65535.")"
-  role="$(_shell_tools_resolve_validated "$role" "Role" "proxmox" _shell_tools_valid_role "Role cannot be empty and cannot contain commas.")"
 
-  if [ -z "$check_ports" ]; then
-    case "$role" in
-      *proxmox*|*Proxmox*) check_ports="22;8006" ;;
-      *) check_ports="22" ;;
-    esac
+  if _shell_tools_yes_no "SSH access to this host?" "yes"; then
+    ssh_enabled="true"
+    user="$(_shell_tools_resolve_validated "" "SSH user" "root" _shell_tools_valid_user "Use a simple SSH user, like root, ubuntu, admin, or adrien.")"
+    port="$(_shell_tools_resolve_validated "" "SSH port" "22" _shell_tools_valid_port "This is not a valid TCP port. Use a number from 1 to 65535.")"
+
+    if _shell_tools_yes_no "Add this host to ~/.ssh/config?" "yes"; then
+      in_ssh_config="true"
+      _shell_tools_ensure_ssh_key
+      _shell_tools_add_ssh_config "$name" "$host" "$user" "$port"
+      printf "\nCopy the public key above to the host, then type:\n"
+      printf "  ssh %s\n" "$name"
+      printf "To list all SSH shortcuts, type:\n"
+      printf "  sshhosts\n\n"
+    fi
   fi
 
-  check_ports="$(_shell_tools_resolve_ports "$check_ports" "Ports to check, semicolon separated" "$check_ports")"
-
-  if [ -z "$url" ]; then
-    case "$role" in
-      *proxmox*|*Proxmox*) url="https://$host:8006" ;;
-      *) url="" ;;
-    esac
+  if _shell_tools_yes_no "Does this host use Docker?" "no"; then
+    docker="true"
+    if [ "$ssh_enabled" != "true" ]; then
+      echo "Docker discovery needs SSH later. You can still save the host now." >&2
+    fi
   fi
 
-  url="$(_shell_tools_resolve_validated "$url" "Web URL, optional" "$url" _shell_tools_valid_url "Use a full URL like https://192.168.1.185:8006, or leave it empty.")"
+  services="$(_shell_tools_read_services "")"
 
-  for value in "$name" "$host" "$user" "$port" "$role" "$check_ports" "$url"; do
+  for value in "$name" "$host" "$ssh_enabled" "$user" "$port" "$in_ssh_config" "$docker" "$services"; do
     if ! _shell_tools_csv_safe "$value"; then
       echo "Commas and newlines are not supported in infra values yet."
       return 1
     fi
   done
 
-  if _shell_tools_yes_no "Add this host to ~/.ssh/config?" "yes"; then
-    _shell_tools_ensure_ssh_key
-    _shell_tools_add_ssh_config "$name" "$host" "$user" "$port"
-    printf "When the key is installed on the host, connect with: ssh %s\n" "$name"
-  else
-    ssh_enabled="false"
-  fi
-
-  _shell_tools_save_infra_record "$name" "$host" "$user" "$port" "$role" "$check_ports" "$url" "$ssh_enabled"
+  _shell_tools_save_infra_record "$name" "$host" "$ssh_enabled" "$user" "$port" "$in_ssh_config" "$docker" "$services"
   printf "%sInfra host saved:%s %s (%s)\n" "$ST_GREEN" "$ST_RESET" "$name" "$host"
 }
 
@@ -540,7 +641,7 @@ infra-list() {
     return 1
   fi
 
-  awk -F, 'NR == 1 { next } { printf "%-14s %-15s %-10s %-6s %-12s %s\n", $1, $2, $3, $4, $5, $7 }' "$INFRA_HOSTS_FILE"
+  awk -F, 'NR == 1 { next } { printf "%-14s %-15s ssh:%-5s docker:%-5s services:%s\n", $1, $2, $3, $7, $8 }' "$INFRA_HOSTS_FILE"
 }
 
 _shell_tools_select_infra_host() {
@@ -565,9 +666,8 @@ _shell_tools_select_infra_host() {
   if command -v fzf >/dev/null 2>&1; then
     selected="$(tail -n +2 "$INFRA_HOSTS_FILE" | awk -F, '{ print $1 }' | sort -u | fzf --height 40% --layout reverse --border --prompt "Infra host > ")"
   else
-    tail -n +2 "$INFRA_HOSTS_FILE" | awk -F, '{ print $1 }' | sort -u | nl -w2 -s') '
-    printf "Host number [1]: "
-    read -r choice
+    tail -n +2 "$INFRA_HOSTS_FILE" | awk -F, '{ print $1 }' | sort -u | nl -w2 -s') ' >&2
+    choice="$(_shell_tools_read_default "Host number" "1")"
     choice="${choice:-1}"
     selected="$(tail -n +2 "$INFRA_HOSTS_FILE" | awk -F, '{ print $1 }' | sort -u | sed -n "${choice}p")"
   fi
@@ -580,35 +680,55 @@ infra-edit() {
   local requested="${1:-}"
   local selected
   local line
-  local name host user port role check_ports url ssh_enabled
-  local new_name new_host new_user new_port new_role new_check_ports new_url new_ssh_enabled
+  local name host ssh_enabled user port in_ssh_config docker services
+  local new_name new_host new_user new_port new_ssh_enabled new_in_ssh_config new_docker new_services
 
   shell-tools-ensure-home
   selected="$(_shell_tools_select_infra_host "$requested")" || return 1
   line="$(awk -F, -v host="$selected" 'NR > 1 && $1 == host { print; exit }' "$INFRA_HOSTS_FILE")"
   [ -n "$line" ] || return 1
 
-  IFS=, read -r name host user port role check_ports url ssh_enabled <<EOF
-$line
-EOF
+  name="$(printf "%s\n" "$line" | awk -F, '{ print $1 }')"
+  host="$(printf "%s\n" "$line" | awk -F, '{ print $2 }')"
+  ssh_enabled="$(printf "%s\n" "$line" | awk -F, '{ print $3 }')"
+  user="$(printf "%s\n" "$line" | awk -F, '{ print $4 }')"
+  port="$(printf "%s\n" "$line" | awk -F, '{ print $5 }')"
+  in_ssh_config="$(printf "%s\n" "$line" | awk -F, '{ print $6 }')"
+  docker="$(printf "%s\n" "$line" | awk -F, '{ print $7 }')"
+  services="$(printf "%s\n" "$line" | awk -F, '{ print $8 }')"
 
   printf "\n%sEditing infra host: %s%s\n" "$ST_CYAN" "$name" "$ST_RESET"
   new_name="$(_shell_tools_read_validated "Host alias" "$name" _shell_tools_valid_name "Use a host alias like proxmox, docker-vm, or app01.")"
   new_host="$(_shell_tools_read_validated "Host IPv4" "$host" _shell_tools_valid_ipv4 "This is not an IPv4 address. Example: 192.168.1.185.")"
-  new_user="$(_shell_tools_read_validated "SSH user" "$user" _shell_tools_valid_user "Use a simple SSH user, like root, ubuntu, admin, or adrien.")"
-  new_port="$(_shell_tools_read_validated "SSH port" "$port" _shell_tools_valid_port "This is not a valid TCP port. Use a number from 1 to 65535.")"
-  new_role="$(_shell_tools_read_validated "Role" "$role" _shell_tools_valid_role "Role cannot be empty and cannot contain commas.")"
-  new_check_ports="$(_shell_tools_resolve_ports "" "Ports to check, semicolon separated" "$check_ports")"
-  new_url="$(_shell_tools_read_validated "Web URL, optional" "$url" _shell_tools_valid_url "Use a full URL like https://192.168.1.185:8006, or leave it empty.")"
-  new_ssh_enabled="false"
 
-  if _shell_tools_yes_no "Update/add this host in ~/.ssh/config?" "$([ "$ssh_enabled" = "true" ] && printf yes || printf no)"; then
+  new_ssh_enabled="false"
+  new_user=""
+  new_port=""
+  new_in_ssh_config="false"
+  if _shell_tools_yes_no "SSH access to this host?" "$([ "$ssh_enabled" = "true" ] && printf yes || printf no)"; then
     new_ssh_enabled="true"
-    _shell_tools_ensure_ssh_key
-    _shell_tools_set_ssh_config "$new_name" "$new_host" "$new_user" "$new_port" "$name"
+    new_user="$(_shell_tools_read_validated "SSH user" "${user:-root}" _shell_tools_valid_user "Use a simple SSH user, like root, ubuntu, admin, or adrien.")"
+    new_port="$(_shell_tools_read_validated "SSH port" "${port:-22}" _shell_tools_valid_port "This is not a valid TCP port. Use a number from 1 to 65535.")"
+
+    if _shell_tools_yes_no "Update/add this host in ~/.ssh/config?" "$([ "$in_ssh_config" = "true" ] && printf yes || printf no)"; then
+      new_in_ssh_config="true"
+      _shell_tools_ensure_ssh_key
+      _shell_tools_set_ssh_config "$new_name" "$new_host" "$new_user" "$new_port" "$name"
+      printf "\nCopy the public key above to the host, then type:\n"
+      printf "  ssh %s\n" "$new_name"
+      printf "To list all SSH shortcuts, type:\n"
+      printf "  sshhosts\n\n"
+    fi
   fi
 
-  _shell_tools_save_infra_record "$new_name" "$new_host" "$new_user" "$new_port" "$new_role" "$new_check_ports" "$new_url" "$new_ssh_enabled" "$name"
+  new_docker="false"
+  if _shell_tools_yes_no "Does this host use Docker?" "$([ "$docker" = "true" ] && printf yes || printf no)"; then
+    new_docker="true"
+  fi
+
+  new_services="$(_shell_tools_read_services "$services")"
+
+  _shell_tools_save_infra_record "$new_name" "$new_host" "$new_ssh_enabled" "$new_user" "$new_port" "$new_in_ssh_config" "$new_docker" "$new_services" "$name"
   printf "%sInfra host updated.%s\n" "$ST_GREEN" "$ST_RESET"
 }
 
@@ -666,6 +786,67 @@ _shell_tools_port_open() {
   return 2
 }
 
+_shell_tools_service_host() {
+  local service="$(_shell_tools_normalize_service_address "$1")"
+  service="${service#http://}"
+  service="${service#https://}"
+  service="${service%%/*}"
+  service="${service%%:*}"
+  printf "%s" "$service"
+}
+
+_shell_tools_service_port() {
+  local raw="$1"
+  local service="$(_shell_tools_normalize_service_address "$raw")"
+  local scheme="http"
+  local authority
+  local port
+
+  case "$service" in
+    https://*) scheme="https" ;;
+  esac
+
+  authority="${service#http://}"
+  authority="${authority#https://}"
+  authority="${authority%%/*}"
+
+  case "$authority" in
+    *:*)
+      port="${authority##*:}"
+      ;;
+    *)
+      if [ "$scheme" = "https" ]; then
+        port="443"
+      else
+        port="80"
+      fi
+      ;;
+  esac
+
+  printf "%s" "$port"
+}
+
+_shell_tools_display_services() {
+  local services="$1"
+  local service
+  local service_host
+  local service_port
+
+  [ -n "$services" ] || return 0
+
+  printf "%s" "$services" | tr ';' '\n' | while IFS= read -r service; do
+    [ -n "$service" ] || continue
+    service_host="$(_shell_tools_service_host "$service")"
+    service_port="$(_shell_tools_service_port "$service")"
+
+    if _shell_tools_port_open "$service_host" "$service_port"; then
+      printf "  %sservice %-32s OPEN on %s:%s%s\n" "$ST_GREEN" "$service" "$service_host" "$service_port" "$ST_RESET"
+    else
+      printf "  %sservice %-32s CLOSED on %s:%s%s\n" "$ST_RED" "$service" "$service_host" "$service_port" "$ST_RESET"
+    fi
+  done
+}
+
 _shell_tools_docker_scan() {
   local name="$1"
   local host="$2"
@@ -697,7 +878,7 @@ shellsetup() {
 
   if [ "$(tail -n +2 "$INFRA_HOSTS_FILE" 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" = "0" ]; then
     if _shell_tools_yes_no "Add your default Proxmox host at 192.168.1.185?" "yes"; then
-      infra-add proxmox 192.168.1.185 root 22 proxmox "22;8006" "https://192.168.1.185:8006"
+      infra-add proxmox 192.168.1.185
     fi
   fi
 
@@ -721,35 +902,28 @@ init() {
     fi
   fi
 
-  tail -n +2 "$INFRA_HOSTS_FILE" 2>/dev/null | while IFS=, read -r name host user port role check_ports url ssh_enabled; do
+  tail -n +2 "$INFRA_HOSTS_FILE" 2>/dev/null | while IFS=, read -r name host ssh_enabled user port in_ssh_config docker services; do
     [ -n "$name" ] || continue
 
     if _shell_tools_ping "$host"; then
-      printf "%s%-14s %-15s %-8s %-12s%s\n" "$ST_GREEN" "$name" "$host" "UP" "$role" "$ST_RESET"
+      printf "%s%-14s %-15s %-8s ssh:%-5s docker:%-5s%s\n" "$ST_GREEN" "$name" "$host" "UP" "$ssh_enabled" "$docker" "$ST_RESET"
     else
-      printf "%s%-14s %-15s %-8s %-12s%s\n" "$ST_RED" "$name" "$host" "DOWN" "$role" "$ST_RESET"
+      printf "%s%-14s %-15s %-8s ssh:%-5s docker:%-5s%s\n" "$ST_RED" "$name" "$host" "DOWN" "$ssh_enabled" "$docker" "$ST_RESET"
     fi
 
-    normalized_ports="$(_shell_tools_normalize_ports "$check_ports" 2>/dev/null || true)"
-    if [ -z "$normalized_ports" ]; then
-      printf "  %sinvalid port list:%s %s\n" "$ST_YELLOW" "$ST_RESET" "$check_ports"
-      continue
-    fi
-
-    printf "%s" "$normalized_ports" | tr ';' '\n' | while IFS= read -r check_port; do
-      [ -n "$check_port" ] || continue
-      if _shell_tools_port_open "$host" "$check_port"; then
-        printf "  %sport %-6s OPEN%s\n" "$ST_GREEN" "$check_port" "$ST_RESET"
+    if [ "$ssh_enabled" = "true" ] && [ -n "$port" ]; then
+      if _shell_tools_port_open "$host" "$port"; then
+        printf "  %sssh    %-32s OPEN on %s:%s%s\n" "$ST_GREEN" "ssh $name" "$host" "$port" "$ST_RESET"
       else
-        printf "  %sport %-6s CLOSED%s\n" "$ST_RED" "$check_port" "$ST_RESET"
+        printf "  %sssh    %-32s CLOSED on %s:%s%s\n" "$ST_RED" "ssh $name" "$host" "$port" "$ST_RESET"
       fi
-    done
+    fi
 
-    [ -n "$url" ] && printf "  %surl%s        %s\n" "$ST_CYAN" "$ST_RESET" "$url"
+    _shell_tools_display_services "$services"
 
-    case "$role" in
-      *docker*|*Docker*) _shell_tools_docker_scan "$name" "$host" "$ssh_enabled" ;;
-    esac
+    if [ "$docker" = "true" ]; then
+      _shell_tools_docker_scan "$name" "$host" "$in_ssh_config"
+    fi
   done
 
   printf "\n"

@@ -43,7 +43,7 @@ bash install-macos.sh
 - Shows the public key and tells you how to copy it to the remote host.
 - Adds SSH hosts to `~/.ssh/config`.
 - Stores infra hosts in `~/.shell-alias-tools/infra-hosts.csv`.
-- Seeds a smart default for Proxmox at `192.168.1.185` with checks for ports `22` and `8006`.
+- Tracks one host with many exposed service addresses.
 
 ## Main Commands
 
@@ -90,28 +90,35 @@ bash install.sh --skip-infra
 
 ## Infra Config
 
+The host setup flow is:
+
+```text
+Host alias
+Host IPv4
+SSH access? yes/no
+  SSH user
+  SSH port
+  Add to ~/.ssh/config? yes/no
+Docker on this host? yes/no
+Service address? yes/no
+  http://paperless.home.arpa
+  192.168.1.187:8000
+```
+
 Hosts are stored as CSV:
 
-```text
-Name,HostName,User,Port,Role,CheckPorts,Url,SshEnabled
-proxmox,192.168.1.185,root,22,proxmox,22;8006,https://192.168.1.185:8006,true
+```csv
+Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services
+proxmox,192.168.1.185,true,root,22,true,true,http://paperless.home.arpa;http://192.168.1.187:8000
 ```
 
-Roles are free text. If a host role contains `docker`, `init` will try a quick SSH Docker scan and print exposed container URLs.
+If Docker is enabled and the host has an SSH config entry, `init` will try a quick SSH Docker scan and print exposed container URLs.
 
-Ports can be entered with semicolons, commas, or spaces:
-
-```text
-22;8006
-22, 8006
-22 8006
-```
-
-They are normalized to `22;8006` before saving so Bash and macOS Zsh check each port separately.
+Service addresses can be URLs or host:port values. Host:port values are normalized with `http://` before saving.
 
 ## macOS Notes
 
-Yes, `fzf` works on macOS. The installer can install it with Homebrew, and Shell Alias Tools uses the `fzf` command directly for `sshhosts` and `infra-edit`.
+Yes, `fzf` works on macOS. The installer treats it as a required dependency for the best experience and can install it with Homebrew. Shell Alias Tools uses `fzf` directly for `sshhosts` and `infra-edit`.
 
 Docker and Multipass are heavier desktop tools on macOS, so the installer asks before installing each one.
 
