@@ -297,7 +297,7 @@ profile_candidates() {
   if [ "$os" = "macos" ]; then
     printf "%s\n" "$HOME/.zshrc"
     [ -f "$HOME/.bashrc" ] && printf "%s\n" "$HOME/.bashrc"
-    return
+    return 0
   fi
 
   case "${SHELL:-}" in
@@ -306,6 +306,7 @@ profile_candidates() {
   esac
 
   [ -f "$HOME/.zshrc" ] && printf "%s\n" "$HOME/.zshrc"
+  return 0
 }
 
 install_profile_hook() {
@@ -672,13 +673,15 @@ configure_infra() {
 main() {
   local os
   local profile
+  local profile_list
 
   os="$(detect_os)"
   info "Installing Shell Alias Tools for $os..."
 
   copy_runtime
 
-  profile_candidates "$os" | while IFS= read -r profile; do
+  profile_list="$(profile_candidates "$os")"
+  printf "%s\n" "$profile_list" | while IFS= read -r profile; do
     [ -n "$profile" ] && install_profile_hook "$profile"
   done
 
@@ -693,7 +696,9 @@ main() {
 
   ok "Install complete."
   printf "\nIMPORTANT: restart your terminal to apply the effect.\n"
-  printf "For this current terminal only, you can also run:\n"
+  printf "For this current terminal only, reload your profile with:\n"
+  printf "  source \"%s\"\n" "$(printf "%s\n" "$profile_list" | sed -n '1p')"
+  printf "Or load the runtime directly with:\n"
   printf "  source \"%s/shell-tools.sh\"\n" "$INSTALL_DIR"
   printf "\nThen try:\n"
   printf "  init\n"
