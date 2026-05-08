@@ -112,7 +112,7 @@ Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services
 proxmox,192.168.1.185,true,root,22,true,true,http://paperless.home.arpa;http://192.168.1.187:8000
 ```
 
-If Docker is enabled and the host has an SSH config entry, `init` will try a quick SSH Docker scan and print exposed container URLs.
+If Docker is enabled and the host has SSH access, `init` will run `docker ps` over SSH and print exposed container URLs. It uses the SSH config alias when available, otherwise it connects with `ssh -p <port> <user>@<ip>`.
 
 Service addresses can be URLs or host:port values. Host:port values are normalized with `http://` before saving.
 

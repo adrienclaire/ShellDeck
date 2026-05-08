@@ -78,7 +78,7 @@ prompt_yes_no() {
   local answer
   local tty="/dev/tty"
 
-  [ -r "$tty" ] || tty=""
+  [ -e "$tty" ] || tty=""
 
   if [ "$ASSUME_YES" -eq 1 ]; then
     [ "$default" = "yes" ]
@@ -120,7 +120,7 @@ read_default() {
   local answer
   local tty="/dev/tty"
 
-  [ -r "$tty" ] || tty=""
+  [ -e "$tty" ] || tty=""
 
   if [ "$ASSUME_YES" -eq 1 ]; then
     printf "%s" "$default"
@@ -331,9 +331,11 @@ install_profile_hook() {
 }
 
 ensure_homebrew() {
+  local default="${1:-yes}"
+
   if ! command -v brew >/dev/null 2>&1; then
     warn "Homebrew is not installed."
-    if prompt_yes_no "Install Homebrew now?" "no"; then
+    if prompt_yes_no "Install Homebrew now?" "$default"; then
       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
       eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null || true)"
     else
@@ -425,8 +427,9 @@ install_linux_dependency() {
 
 install_macos_dependency() {
   local tool="$1"
+  local required="${2:-yes}"
 
-  ensure_homebrew
+  ensure_homebrew "$required"
   command -v brew >/dev/null 2>&1 || return
 
   case "$tool" in
@@ -473,7 +476,7 @@ install_dependencies() {
         fi
         ;;
       macos)
-        install_macos_dependency "$tool" || warn "Could not install $tool automatically."
+        install_macos_dependency "$tool" "yes" || warn "Could not install $tool automatically."
         ;;
     esac
   done
@@ -502,7 +505,7 @@ install_dependencies() {
         fi
         ;;
       macos)
-        install_macos_dependency "$tool" || warn "Could not install $tool automatically."
+        install_macos_dependency "$tool" "no" || warn "Could not install $tool automatically."
         ;;
     esac
   done
@@ -672,7 +675,8 @@ main() {
   fi
 
   ok "Install complete."
-  printf "\nRestart your terminal or run:\n"
+  printf "\nIMPORTANT: restart your terminal to apply the effect.\n"
+  printf "For this current terminal only, you can also run:\n"
   printf "  source \"%s/shell-tools.sh\"\n" "$INSTALL_DIR"
   printf "\nThen try:\n"
   printf "  init\n"

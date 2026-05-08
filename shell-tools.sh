@@ -205,7 +205,7 @@ _shell_tools_read_default() {
   local answer
   local tty="/dev/tty"
 
-  [ -r "$tty" ] || tty=""
+  [ -e "$tty" ] || tty=""
 
   if [ -n "$default" ]; then
     if [ -n "$tty" ]; then
@@ -235,7 +235,7 @@ _shell_tools_yes_no() {
   local answer
   local tty="/dev/tty"
 
-  [ -r "$tty" ] || tty=""
+  [ -e "$tty" ] || tty=""
 
   if [ "$default" = "yes" ]; then
     suffix="Y/n"
@@ -851,12 +851,24 @@ _shell_tools_docker_scan() {
   local name="$1"
   local host="$2"
   local ssh_enabled="$3"
+  local user="${4:-}"
+  local port="${5:-22}"
+  local in_ssh_config="${6:-false}"
   local containers
+  local target
 
   [ "$ssh_enabled" = "true" ] || return 0
   command -v ssh >/dev/null 2>&1 || return 0
 
-  containers="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$name" "docker ps --format '{{.Names}}|{{.Ports}}'" 2>/dev/null || true)"
+  if [ "$in_ssh_config" = "true" ]; then
+    containers="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$name" "docker ps --format '{{.Names}}|{{.Ports}}'" 2>/dev/null || true)"
+  elif [ -n "$user" ] && [ -n "$host" ] && [ -n "$port" ]; then
+    target="$user@$host"
+    containers="$(ssh -o BatchMode=yes -o ConnectTimeout=3 -p "$port" "$target" "docker ps --format '{{.Names}}|{{.Ports}}'" 2>/dev/null || true)"
+  else
+    return 0
+  fi
+
   [ -n "$containers" ] || return 0
 
   printf "\n%sDocker services on %s%s\n" "$ST_YELLOW" "$name" "$ST_RESET"
@@ -922,7 +934,7 @@ init() {
     _shell_tools_display_services "$services"
 
     if [ "$docker" = "true" ]; then
-      _shell_tools_docker_scan "$name" "$host" "$in_ssh_config"
+      _shell_tools_docker_scan "$name" "$host" "$ssh_enabled" "$user" "$port" "$in_ssh_config"
     fi
   done
 
