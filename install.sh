@@ -354,6 +354,10 @@ linux_package_for_tool() {
     apt:ssh) printf "openssh-client" ;;
     apt:curl) printf "curl" ;;
     apt:fzf) printf "fzf" ;;
+    apt:bash-completion) printf "bash-completion" ;;
+    apt:bat) printf "bat" ;;
+    apt:eza) printf "eza" ;;
+    apt:zoxide) printf "zoxide" ;;
     apt:jq) printf "jq" ;;
     apt:nc) printf "netcat-openbsd" ;;
     apt:gh) printf "gh" ;;
@@ -363,6 +367,10 @@ linux_package_for_tool() {
     dnf:ssh) printf "openssh-clients" ;;
     dnf:curl) printf "curl" ;;
     dnf:fzf) printf "fzf" ;;
+    dnf:bash-completion) printf "bash-completion" ;;
+    dnf:bat) printf "bat" ;;
+    dnf:eza) printf "eza" ;;
+    dnf:zoxide) printf "zoxide" ;;
     dnf:jq) printf "jq" ;;
     dnf:nc) printf "nmap-ncat" ;;
     dnf:gh) printf "gh" ;;
@@ -372,6 +380,10 @@ linux_package_for_tool() {
     pacman:ssh) printf "openssh" ;;
     pacman:curl) printf "curl" ;;
     pacman:fzf) printf "fzf" ;;
+    pacman:bash-completion) printf "bash-completion" ;;
+    pacman:bat) printf "bat" ;;
+    pacman:eza) printf "eza" ;;
+    pacman:zoxide) printf "zoxide" ;;
     pacman:jq) printf "jq" ;;
     pacman:nc) printf "gnu-netcat" ;;
     pacman:gh) printf "github-cli" ;;
@@ -381,6 +393,10 @@ linux_package_for_tool() {
     apk:ssh) printf "openssh-client" ;;
     apk:curl) printf "curl" ;;
     apk:fzf) printf "fzf" ;;
+    apk:bash-completion) printf "bash-completion" ;;
+    apk:bat) printf "bat" ;;
+    apk:eza) printf "eza" ;;
+    apk:zoxide) printf "zoxide" ;;
     apk:jq) printf "jq" ;;
     apk:nc) printf "netcat-openbsd" ;;
     apk:gh) printf "github-cli" ;;
@@ -436,9 +452,37 @@ install_macos_dependency() {
   case "$tool" in
     docker) brew install --cask docker ;;
     multipass) brew install --cask multipass ;;
+    bash-completion) brew install bash-completion@2 ;;
     ssh) brew install openssh ;;
     nc) brew install netcat ;;
     *) brew install "$tool" ;;
+  esac
+}
+
+dependency_path() {
+  local tool="$1"
+  local candidate
+
+  case "$tool" in
+    bash-completion)
+      for candidate in \
+        /etc/bash_completion \
+        /usr/share/bash-completion/bash_completion \
+        /opt/homebrew/etc/profile.d/bash_completion.sh \
+        /usr/local/etc/profile.d/bash_completion.sh; do
+        [ -f "$candidate" ] && printf "%s" "$candidate" && return 0
+      done
+      return 1
+      ;;
+    bat)
+      command -v bat 2>/dev/null || command -v batcat 2>/dev/null
+      ;;
+    nc)
+      command -v nc 2>/dev/null || command -v ncat 2>/dev/null
+      ;;
+    *)
+      command -v "$tool" 2>/dev/null
+      ;;
   esac
 }
 
@@ -450,7 +494,7 @@ install_dependencies() {
   local status
   local install_label
   local command_path
-  local required_tools="git ssh curl fzf jq nc"
+  local required_tools="git ssh curl fzf bash-completion bat eza zoxide jq nc"
   local optional_tools="gh docker multipass"
 
   if [ "$os" = "linux" ]; then
@@ -466,8 +510,8 @@ install_dependencies() {
   for tool in $required_tools; do
     status="missing"
     command_path=""
-    if command -v "$tool" >/dev/null 2>&1; then
-      command_path="$(command -v "$tool")"
+    command_path="$(dependency_path "$tool" 2>/dev/null || true)"
+    if [ -n "$command_path" ]; then
       status="installed at $command_path"
     fi
 
@@ -476,7 +520,7 @@ install_dependencies() {
       default="no"
     fi
 
-    install_label="Install/update required dependency '$tool'? ($status)"
+    install_label="Install/update smart-shell dependency '$tool'? ($status)"
     if ! prompt_yes_no "$install_label" "$default"; then
       warn "$tool is required for the best Shell Alias Tools experience. Some commands may fall back or fail."
       continue
@@ -499,8 +543,8 @@ install_dependencies() {
   for tool in $optional_tools; do
     status="missing"
     command_path=""
-    if command -v "$tool" >/dev/null 2>&1; then
-      command_path="$(command -v "$tool")"
+    command_path="$(dependency_path "$tool" 2>/dev/null || true)"
+    if [ -n "$command_path" ]; then
       status="installed at $command_path"
     fi
 

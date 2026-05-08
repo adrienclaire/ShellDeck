@@ -36,8 +36,9 @@ bash install-macos.sh
 - Installs the shell runtime into `~/.shell-alias-tools`.
 - Hooks the runtime into your PowerShell, Bash, or Zsh profile.
 - Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, and infra host count.
-- Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `fzf`, `jq`, `gh`, and `nc` where supported.
-- Shows a dependency checklist every install and asks directly about `git`, `ssh`, `curl`, `fzf`, `jq`, `nc`, `gh`, `docker`, and `multipass`.
+- Turns Bash into a smarter daily shell with clean shared history, Bash completion, fzf key bindings, modern file listing, pretty file reading, smart directory jumping, and safe fallbacks.
+- Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `jq`, `gh`, and `nc` where supported.
+- Shows a dependency checklist every install and asks directly about `git`, `ssh`, `curl`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `jq`, `nc`, `gh`, `docker`, and `multipass`.
 - Asks whether to enable inbound SSH on the new VM or machine.
 - Asks whether to generate an ed25519 SSH key.
 - Shows the public key and tells you how to copy it to the remote host.
@@ -62,6 +63,12 @@ myhelp        Show all commands
 Alias helpers:
 
 ```text
+ll/la/l/lt    Modern directory listing with eza when available
+cat/catp      Pretty file reading with bat or batcat when available
+z/zi          Smart directory jumping with zoxide when available
+cdf           Fuzzy cd into a directory with fzf
+mkcd          Create a directory and cd into it
+please        Re-run the previous command with sudo
 aa            Save the previous command as an alias/function
 laa           List aliases on Bash/Zsh
 rma           Remove alias on Bash/Zsh
@@ -69,6 +76,20 @@ lf            List saved PowerShell functions
 ep            Edit PowerShell profile
 reloadp       Reload the profile runtime
 ```
+
+## Smart Bash Layer
+
+On interactive Bash shells, the runtime applies a Bash-compatible quality-of-life layer:
+
+```bash
+HISTSIZE=100000
+HISTFILESIZE=200000
+HISTCONTROL=ignoreboth:erasedups
+shopt -s histappend cmdhist checkwinsize
+PROMPT_COMMAND='history -a; history -c; history -r'
+```
+
+It sources `bash-completion` when installed, loads fzf key bindings and completion from common Linux and Homebrew paths, initializes zoxide, and defines modern aliases only when they do not already exist. Existing custom aliases saved with `aa` still win.
 
 ## Install Options
 

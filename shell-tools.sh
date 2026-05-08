@@ -59,6 +59,216 @@ _shell_tools_migrate_infra_hosts() {
 
 shell-tools-ensure-home
 
+_shell_tools_source_first() {
+  local candidate
+
+  for candidate in "$@"; do
+    [ -f "$candidate" ] || continue
+    # shellcheck disable=SC1090
+    . "$candidate" >/dev/null 2>&1 || true
+    return 0
+  done
+
+  return 1
+}
+
+_shell_tools_dependency_path() {
+  local tool="$1"
+  local candidate
+
+  case "$tool" in
+    bash-completion)
+      for candidate in \
+        /etc/bash_completion \
+        /usr/share/bash-completion/bash_completion \
+        /opt/homebrew/etc/profile.d/bash_completion.sh \
+        /usr/local/etc/profile.d/bash_completion.sh; do
+        [ -f "$candidate" ] && printf "%s" "$candidate" && return 0
+      done
+      return 1
+      ;;
+    bat)
+      command -v bat 2>/dev/null || command -v batcat 2>/dev/null
+      ;;
+    nc)
+      command -v nc 2>/dev/null || command -v ncat 2>/dev/null
+      ;;
+    *)
+      command -v "$tool" 2>/dev/null
+      ;;
+  esac
+}
+
+_shell_tools_bat_command() {
+  _shell_tools_dependency_path bat
+}
+
+_shell_tools_configure_history() {
+  [ -n "${BASH_VERSION:-}" ] || return 0
+
+  export HISTSIZE=100000
+  export HISTFILESIZE=200000
+  export HISTCONTROL=ignoreboth:erasedups
+
+  shopt -s histappend cmdhist checkwinsize 2>/dev/null || true
+
+  case ";${PROMPT_COMMAND:-};" in
+    *";history -a; history -c; history -r;"*) ;;
+    *)
+      PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND; }history -a; history -c; history -r"
+      export PROMPT_COMMAND
+      ;;
+  esac
+}
+
+_shell_tools_configure_completion() {
+  [ -n "${BASH_VERSION:-}" ] || return 0
+
+  _shell_tools_source_first \
+    /etc/bash_completion \
+    /usr/share/bash-completion/bash_completion \
+    /opt/homebrew/etc/profile.d/bash_completion.sh \
+    /usr/local/etc/profile.d/bash_completion.sh
+}
+
+_shell_tools_configure_fzf() {
+  command -v fzf >/dev/null 2>&1 || return 0
+
+  export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS:---height 40% --layout=reverse --border --info=inline}"
+  export FZF_CTRL_R_OPTS="${FZF_CTRL_R_OPTS:---height 40% --layout=reverse --border}"
+
+  if [ -n "${BASH_VERSION:-}" ]; then
+    _shell_tools_source_first \
+      /usr/share/doc/fzf/examples/key-bindings.bash \
+      /usr/share/doc/fzf/key-bindings.bash \
+      /usr/share/fzf/key-bindings.bash \
+      /usr/share/fzf/shell/key-bindings.bash \
+      /opt/homebrew/opt/fzf/shell/key-bindings.bash \
+      /usr/local/opt/fzf/shell/key-bindings.bash \
+      "$HOME/.fzf/shell/key-bindings.bash"
+    _shell_tools_source_first \
+      /usr/share/doc/fzf/examples/completion.bash \
+      /usr/share/doc/fzf/completion.bash \
+      /usr/share/fzf/completion.bash \
+      /usr/share/fzf/shell/completion.bash \
+      /opt/homebrew/opt/fzf/shell/completion.bash \
+      /usr/local/opt/fzf/shell/completion.bash \
+      "$HOME/.fzf/shell/completion.bash"
+  elif [ -n "${ZSH_VERSION:-}" ]; then
+    _shell_tools_source_first \
+      /usr/share/doc/fzf/examples/key-bindings.zsh \
+      /usr/share/fzf/key-bindings.zsh \
+      /usr/share/fzf/shell/key-bindings.zsh \
+      /opt/homebrew/opt/fzf/shell/key-bindings.zsh \
+      /usr/local/opt/fzf/shell/key-bindings.zsh \
+      "$HOME/.fzf/shell/key-bindings.zsh"
+    _shell_tools_source_first \
+      /usr/share/doc/fzf/examples/completion.zsh \
+      /usr/share/fzf/completion.zsh \
+      /usr/share/fzf/shell/completion.zsh \
+      /opt/homebrew/opt/fzf/shell/completion.zsh \
+      /usr/local/opt/fzf/shell/completion.zsh \
+      "$HOME/.fzf/shell/completion.zsh"
+  fi
+}
+
+_shell_tools_configure_zoxide() {
+  command -v zoxide >/dev/null 2>&1 || return 0
+  [ "${SHELL_TOOLS_ZOXIDE_READY:-}" = "1" ] && return 0
+
+  if [ -n "${BASH_VERSION:-}" ]; then
+    eval "$(zoxide init bash 2>/dev/null)" || true
+  elif [ -n "${ZSH_VERSION:-}" ]; then
+    eval "$(zoxide init zsh 2>/dev/null)" || true
+  fi
+
+  export SHELL_TOOLS_ZOXIDE_READY=1
+}
+
+_shell_tools_alias_default() {
+  local name="$1"
+  shift || true
+
+  alias "$name" >/dev/null 2>&1 || alias "$name=$*"
+}
+
+_shell_tools_apply_smart_aliases() {
+  local bat_cmd
+
+  if command -v eza >/dev/null 2>&1; then
+    _shell_tools_alias_default ll "eza -lah --git --icons=auto --group-directories-first"
+    _shell_tools_alias_default la "eza -a --icons=auto --group-directories-first"
+    _shell_tools_alias_default l "eza --icons=auto --group-directories-first"
+    _shell_tools_alias_default lt "eza --tree --level=2 --icons=auto --git"
+  else
+    _shell_tools_alias_default ll "ls -lah"
+    _shell_tools_alias_default la "ls -A"
+    _shell_tools_alias_default l "ls -CF"
+  fi
+
+  bat_cmd="$(_shell_tools_bat_command || true)"
+  if [ -n "$bat_cmd" ]; then
+    _shell_tools_alias_default cat "$bat_cmd --paging=never --style=plain"
+    _shell_tools_alias_default catp "$bat_cmd --paging=always"
+  fi
+
+  _shell_tools_alias_default cls "clear"
+  _shell_tools_alias_default .. "cd .."
+  _shell_tools_alias_default ... "cd ../.."
+  _shell_tools_alias_default .... "cd ../../.."
+}
+
+_shell_tools_configure_smart_shell() {
+  _shell_tools_configure_history
+  _shell_tools_configure_completion
+  _shell_tools_configure_fzf
+  _shell_tools_configure_zoxide
+  _shell_tools_apply_smart_aliases
+}
+
+please() {
+  local cmd
+
+  cmd="$(fc -ln -2 -2 2>/dev/null | sed 's/^[[:space:]]*//')"
+  [ -n "$cmd" ] || cmd="$(fc -ln -1 2>/dev/null | sed 's/^[[:space:]]*//')"
+  if [ -z "$cmd" ]; then
+    echo "No previous command found."
+    return 1
+  fi
+
+  case "$cmd" in
+    please|please\ *|sudo|sudo\ *)
+      echo "Previous command already used privilege escalation."
+      return 1
+      ;;
+  esac
+
+  printf "%sRunning with sudo:%s %s\n" "$ST_YELLOW" "$ST_RESET" "$cmd"
+  eval "sudo $cmd"
+}
+
+mkcd() {
+  [ -n "${1:-}" ] || {
+    echo "Usage: mkcd <directory>"
+    return 1
+  }
+
+  mkdir -p "$1" && cd "$1" || return
+}
+
+cdf() {
+  local root="${1:-.}"
+  local dir
+
+  command -v fzf >/dev/null 2>&1 || {
+    echo "fzf is missing. Run check-tools, then reinstall dependencies if needed."
+    return 1
+  }
+
+  dir="$(find "$root" -type d -not -path '*/.git/*' 2>/dev/null | fzf --height 40% --layout=reverse --border --prompt "cd > ")" || return
+  [ -n "$dir" ] && cd "$dir" || return
+}
+
 alias-tools-load() {
   [ -f "$ALIAS_TOOLS_FILE" ] && . "$ALIAS_TOOLS_FILE"
 }
@@ -797,6 +1007,11 @@ _shell_tools_port_open() {
     return
   fi
 
+  if command -v ncat >/dev/null 2>&1; then
+    ncat -z -w 2 "$host" "$port" >/dev/null 2>&1
+    return
+  fi
+
   if [ -n "${BASH_VERSION:-}" ]; then
     (echo >/dev/tcp/"$host"/"$port") >/dev/null 2>&1
     return
@@ -987,11 +1202,14 @@ sshhosts() {
 
 check-tools() {
   local tool
-  for tool in git ssh curl fzf gh docker multipass jq nc; do
-    if command -v "$tool" >/dev/null 2>&1; then
-      printf "%-10s %sOK%s %s\n" "$tool" "$ST_GREEN" "$ST_RESET" "$(command -v "$tool")"
+  local tool_path
+
+  for tool in git ssh curl fzf bash-completion bat eza zoxide jq nc gh docker multipass; do
+    tool_path="$(_shell_tools_dependency_path "$tool" 2>/dev/null || true)"
+    if [ -n "$tool_path" ]; then
+      printf "%-16s %sOK%s %s\n" "$tool" "$ST_GREEN" "$ST_RESET" "$tool_path"
     else
-      printf "%-10s %smissing%s\n" "$tool" "$ST_RED" "$ST_RESET"
+      printf "%-16s %smissing%s\n" "$tool" "$ST_RED" "$ST_RESET"
     fi
   done
 }
@@ -1042,6 +1260,12 @@ myhelp() {
   printf "sshhosts      Pick an SSH host and connect\n"
   printf "check-tools   Check local CLI dependencies\n"
   printf "shelluninstall Remove profile hook and optional data\n"
+  printf "ll/la/l/lt    Smart listing via eza when available\n"
+  printf "cat/catp      Pretty file reading via bat when available\n"
+  printf "z/zi          Smart directory jumping via zoxide when available\n"
+  printf "cdf           Fuzzy cd into a directory with fzf\n"
+  printf "mkcd          Create a directory and cd into it\n"
+  printf "please        Re-run the previous command with sudo\n"
   printf "aa            Save the previous command as an alias\n"
   printf "laa           List aliases\n"
   printf "rma           Remove alias\n"
@@ -1090,5 +1314,9 @@ alias rma='rm-alias'
 alias-tools-load
 
 case "$-" in
-  *i*) shell-tools-dashboard ;;
+  *i*)
+    _shell_tools_configure_smart_shell
+    alias-tools-load
+    shell-tools-dashboard
+    ;;
 esac
