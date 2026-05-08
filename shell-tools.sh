@@ -227,6 +227,122 @@ _shell_tools_yes_no() {
   done
 }
 
+_shell_tools_valid_name() {
+  printf "%s" "$1" | grep -Eq '^[A-Za-z][A-Za-z0-9._-]*$'
+}
+
+_shell_tools_valid_ipv4() {
+  printf "%s" "$1" |
+    awk -F. '
+      NF != 4 { exit 1 }
+      {
+        for (i = 1; i <= 4; i++) {
+          if ($i !~ /^[0-9][0-9]?[0-9]?$/ || $i < 0 || $i > 255) exit 1
+        }
+      }
+    '
+}
+
+_shell_tools_valid_user() {
+  printf "%s" "$1" | grep -Eq '^[A-Za-z0-9._-]+[$]?$'
+}
+
+_shell_tools_valid_role() {
+  [ -n "$1" ] && printf "%s" "$1" | grep -Eq '^[^,]+$'
+}
+
+_shell_tools_valid_url() {
+  [ -z "$1" ] || printf "%s" "$1" | grep -Eq '^https?://[^[:space:],]+$'
+}
+
+_shell_tools_valid_port() {
+  case "$1" in
+    ""|*[!0-9]*) return 1 ;;
+  esac
+  [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le 65535 ] 2>/dev/null
+}
+
+_shell_tools_normalize_ports() {
+  local input="$1"
+
+  printf "%s" "$input" |
+    tr ',;[:space:]' '\n' |
+    sed '/^$/d' |
+    awk '
+      $0 !~ /^[0-9]+$/ || $0 < 1 || $0 > 65535 { bad = 1; next }
+      !seen[$0]++ { out = out sep $0; sep = ";" }
+      END {
+        if (bad || out == "") exit 1
+        print out
+      }
+    '
+}
+
+_shell_tools_read_validated() {
+  local prompt="$1"
+  local default="$2"
+  local validator="$3"
+  local error="$4"
+  local value
+
+  while true; do
+    value="$(_shell_tools_read_default "$prompt" "$default")"
+    if "$validator" "$value"; then
+      printf "%s" "$value"
+      return 0
+    fi
+
+    echo "$error" >&2
+  done
+}
+
+_shell_tools_resolve_validated() {
+  local value="$1"
+  local prompt="$2"
+  local default="$3"
+  local validator="$4"
+  local error="$5"
+
+  if [ -n "$value" ] && "$validator" "$value"; then
+    printf "%s" "$value"
+    return 0
+  fi
+
+  if [ -n "$value" ]; then
+    echo "'$value' is invalid. $error" >&2
+  fi
+
+  _shell_tools_read_validated "$prompt" "$default" "$validator" "$error"
+}
+
+_shell_tools_resolve_ports() {
+  local value="$1"
+  local prompt="$2"
+  local default="$3"
+  local normalized
+
+  if [ -n "$value" ]; then
+    normalized="$(_shell_tools_normalize_ports "$value" 2>/dev/null || true)"
+    if [ -n "$normalized" ]; then
+      printf "%s" "$normalized"
+      return 0
+    fi
+
+    echo "'$value' is not a valid port list. Use values like 22;8006 or 22, 8006." >&2
+  fi
+
+  while true; do
+    value="$(_shell_tools_read_default "$prompt" "$default")"
+    normalized="$(_shell_tools_normalize_ports "$value" 2>/dev/null || true)"
+    if [ -n "$normalized" ]; then
+      printf "%s" "$normalized"
+      return 0
+    fi
+
+    echo "This is not a valid port list. Use values like 22;8006 or 22, 8006." >&2
+  done
+}
+
 _shell_tools_csv_safe() {
   case "$1" in
     *","*|*$'\n'*)
@@ -241,6 +357,25 @@ _shell_tools_csv_safe() {
 _shell_tools_host_exists() {
   local name="$1"
   [ -f "$INFRA_HOSTS_FILE" ] && awk -F, -v host="$name" 'NR > 1 && $1 == host { found = 1 } END { exit found ? 0 : 1 }' "$INFRA_HOSTS_FILE"
+}
+
+_shell_tools_save_infra_record() {
+  local name="$1"
+  local host="$2"
+  local user="$3"
+  local port="$4"
+  local role="$5"
+  local check_ports="$6"
+  local url="$7"
+  local ssh_enabled="$8"
+  local old_name="${9:-}"
+  local tmp
+
+  shell-tools-ensure-home
+  tmp="${INFRA_HOSTS_FILE}.tmp.$$"
+  awk -F, -v host="$name" -v old="$old_name" 'NR == 1 || ($1 != host && (old == "" || $1 != old))' "$INFRA_HOSTS_FILE" > "$tmp" 2>/dev/null || true
+  mv "$tmp" "$INFRA_HOSTS_FILE"
+  printf "%s,%s,%s,%s,%s,%s,%s,%s\n" "$name" "$host" "$user" "$port" "$role" "$check_ports" "$url" "$ssh_enabled" >> "$INFRA_HOSTS_FILE"
 }
 
 _shell_tools_add_ssh_config() {
@@ -270,6 +405,54 @@ _shell_tools_add_ssh_config() {
   } >> "$config"
 
   printf "%sSSH host added:%s ssh %s\n" "$ST_GREEN" "$ST_RESET" "$name"
+}
+
+_shell_tools_remove_ssh_config_host() {
+  local name="$1"
+  local config="$HOME/.ssh/config"
+  local tmp
+
+  [ -f "$config" ] || return 0
+  tmp="${config}.tmp.$$"
+  awk -v host="$name" '
+    /^[[:space:]]*Host[[:space:]]+/ {
+      skip = 0
+      for (i = 2; i <= NF; i++) {
+        if ($i == host) skip = 1
+      }
+      if (skip) next
+    }
+    !skip { print }
+  ' "$config" > "$tmp"
+  mv "$tmp" "$config"
+  chmod 600 "$config" 2>/dev/null || true
+}
+
+_shell_tools_set_ssh_config() {
+  local name="$1"
+  local host="$2"
+  local user="$3"
+  local port="$4"
+  local old_name="${5:-}"
+
+  mkdir -p "$HOME/.ssh"
+  chmod 700 "$HOME/.ssh" 2>/dev/null || true
+  touch "$HOME/.ssh/config"
+  chmod 600 "$HOME/.ssh/config" 2>/dev/null || true
+
+  [ -z "$old_name" ] || _shell_tools_remove_ssh_config_host "$old_name"
+  _shell_tools_remove_ssh_config_host "$name"
+
+  {
+    printf "\nHost %s\n" "$name"
+    printf "  HostName %s\n" "$host"
+    printf "  User %s\n" "$user"
+    printf "  Port %s\n" "$port"
+    printf "  ServerAliveInterval 30\n"
+    printf "  ServerAliveCountMax 3\n"
+  } >> "$HOME/.ssh/config"
+
+  printf "%sSSH config updated:%s ssh %s\n" "$ST_GREEN" "$ST_RESET" "$name"
 }
 
 _shell_tools_ensure_ssh_key() {
@@ -307,25 +490,29 @@ infra-add() {
   shell-tools-ensure-home
   printf "\n%sInfra host onboarding%s\n" "$ST_CYAN" "$ST_RESET"
 
-  [ -n "$name" ] || name="$(_shell_tools_read_default "Host alias" "proxmox")"
-  [ -n "$host" ] || host="$(_shell_tools_read_default "Host/IP" "192.168.1.185")"
-  [ -n "$user" ] || user="$(_shell_tools_read_default "SSH user" "root")"
-  [ -n "$port" ] || port="$(_shell_tools_read_default "SSH port" "22")"
-  [ -n "$role" ] || role="$(_shell_tools_read_default "Role" "proxmox")"
+  name="$(_shell_tools_resolve_validated "$name" "Host alias" "proxmox" _shell_tools_valid_name "Use a host alias like proxmox, docker-vm, or app01. Letters, numbers, dot, dash, underscore; start with a letter.")"
+  host="$(_shell_tools_resolve_validated "$host" "Host IPv4" "192.168.1.185" _shell_tools_valid_ipv4 "This is not an IPv4 address. Example: 192.168.1.185.")"
+  user="$(_shell_tools_resolve_validated "$user" "SSH user" "root" _shell_tools_valid_user "Use a simple SSH user, like root, ubuntu, admin, or adrien.")"
+  port="$(_shell_tools_resolve_validated "$port" "SSH port" "22" _shell_tools_valid_port "This is not a valid TCP port. Use a number from 1 to 65535.")"
+  role="$(_shell_tools_resolve_validated "$role" "Role" "proxmox" _shell_tools_valid_role "Role cannot be empty and cannot contain commas.")"
 
   if [ -z "$check_ports" ]; then
     case "$role" in
-      *proxmox*|*Proxmox*) check_ports="$(_shell_tools_read_default "Ports to check, semicolon separated" "22;8006")" ;;
-      *) check_ports="$(_shell_tools_read_default "Ports to check, semicolon separated" "22")" ;;
+      *proxmox*|*Proxmox*) check_ports="22;8006" ;;
+      *) check_ports="22" ;;
     esac
   fi
+
+  check_ports="$(_shell_tools_resolve_ports "$check_ports" "Ports to check, semicolon separated" "$check_ports")"
 
   if [ -z "$url" ]; then
     case "$role" in
       *proxmox*|*Proxmox*) url="https://$host:8006" ;;
-      *) url="$(_shell_tools_read_default "Web URL, optional" "")" ;;
+      *) url="" ;;
     esac
   fi
+
+  url="$(_shell_tools_resolve_validated "$url" "Web URL, optional" "$url" _shell_tools_valid_url "Use a full URL like https://192.168.1.185:8006, or leave it empty.")"
 
   for value in "$name" "$host" "$user" "$port" "$role" "$check_ports" "$url"; do
     if ! _shell_tools_csv_safe "$value"; then
@@ -342,10 +529,7 @@ infra-add() {
     ssh_enabled="false"
   fi
 
-  tmp="${INFRA_HOSTS_FILE}.tmp.$$"
-  awk -F, -v host="$name" 'NR == 1 || $1 != host' "$INFRA_HOSTS_FILE" > "$tmp" 2>/dev/null || true
-  mv "$tmp" "$INFRA_HOSTS_FILE"
-  printf "%s,%s,%s,%s,%s,%s,%s,%s\n" "$name" "$host" "$user" "$port" "$role" "$check_ports" "$url" "$ssh_enabled" >> "$INFRA_HOSTS_FILE"
+  _shell_tools_save_infra_record "$name" "$host" "$user" "$port" "$role" "$check_ports" "$url" "$ssh_enabled"
   printf "%sInfra host saved:%s %s (%s)\n" "$ST_GREEN" "$ST_RESET" "$name" "$host"
 }
 
@@ -357,6 +541,75 @@ infra-list() {
   fi
 
   awk -F, 'NR == 1 { next } { printf "%-14s %-15s %-10s %-6s %-12s %s\n", $1, $2, $3, $4, $5, $7 }' "$INFRA_HOSTS_FILE"
+}
+
+_shell_tools_select_infra_host() {
+  local requested="${1:-}"
+  local selected
+  local choice
+
+  if [ -n "$requested" ] && _shell_tools_host_exists "$requested"; then
+    printf "%s" "$requested"
+    return 0
+  fi
+
+  if [ -n "$requested" ]; then
+    echo "Infra host '$requested' was not found." >&2
+  fi
+
+  if [ "$(tail -n +2 "$INFRA_HOSTS_FILE" 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" = "0" ]; then
+    echo "No infra hosts configured." >&2
+    return 1
+  fi
+
+  if command -v fzf >/dev/null 2>&1; then
+    selected="$(tail -n +2 "$INFRA_HOSTS_FILE" | awk -F, '{ print $1 }' | sort -u | fzf --height 40% --layout reverse --border --prompt "Infra host > ")"
+  else
+    tail -n +2 "$INFRA_HOSTS_FILE" | awk -F, '{ print $1 }' | sort -u | nl -w2 -s') '
+    printf "Host number [1]: "
+    read -r choice
+    choice="${choice:-1}"
+    selected="$(tail -n +2 "$INFRA_HOSTS_FILE" | awk -F, '{ print $1 }' | sort -u | sed -n "${choice}p")"
+  fi
+
+  [ -n "$selected" ] || return 1
+  printf "%s" "$selected"
+}
+
+infra-edit() {
+  local requested="${1:-}"
+  local selected
+  local line
+  local name host user port role check_ports url ssh_enabled
+  local new_name new_host new_user new_port new_role new_check_ports new_url new_ssh_enabled
+
+  shell-tools-ensure-home
+  selected="$(_shell_tools_select_infra_host "$requested")" || return 1
+  line="$(awk -F, -v host="$selected" 'NR > 1 && $1 == host { print; exit }' "$INFRA_HOSTS_FILE")"
+  [ -n "$line" ] || return 1
+
+  IFS=, read -r name host user port role check_ports url ssh_enabled <<EOF
+$line
+EOF
+
+  printf "\n%sEditing infra host: %s%s\n" "$ST_CYAN" "$name" "$ST_RESET"
+  new_name="$(_shell_tools_read_validated "Host alias" "$name" _shell_tools_valid_name "Use a host alias like proxmox, docker-vm, or app01.")"
+  new_host="$(_shell_tools_read_validated "Host IPv4" "$host" _shell_tools_valid_ipv4 "This is not an IPv4 address. Example: 192.168.1.185.")"
+  new_user="$(_shell_tools_read_validated "SSH user" "$user" _shell_tools_valid_user "Use a simple SSH user, like root, ubuntu, admin, or adrien.")"
+  new_port="$(_shell_tools_read_validated "SSH port" "$port" _shell_tools_valid_port "This is not a valid TCP port. Use a number from 1 to 65535.")"
+  new_role="$(_shell_tools_read_validated "Role" "$role" _shell_tools_valid_role "Role cannot be empty and cannot contain commas.")"
+  new_check_ports="$(_shell_tools_resolve_ports "" "Ports to check, semicolon separated" "$check_ports")"
+  new_url="$(_shell_tools_read_validated "Web URL, optional" "$url" _shell_tools_valid_url "Use a full URL like https://192.168.1.185:8006, or leave it empty.")"
+  new_ssh_enabled="false"
+
+  if _shell_tools_yes_no "Update/add this host in ~/.ssh/config?" "$([ "$ssh_enabled" = "true" ] && printf yes || printf no)"; then
+    new_ssh_enabled="true"
+    _shell_tools_ensure_ssh_key
+    _shell_tools_set_ssh_config "$new_name" "$new_host" "$new_user" "$new_port" "$name"
+  fi
+
+  _shell_tools_save_infra_record "$new_name" "$new_host" "$new_user" "$new_port" "$new_role" "$new_check_ports" "$new_url" "$new_ssh_enabled" "$name"
+  printf "%sInfra host updated.%s\n" "$ST_GREEN" "$ST_RESET"
 }
 
 _shell_tools_primary_ip() {
@@ -477,19 +730,20 @@ init() {
       printf "%s%-14s %-15s %-8s %-12s%s\n" "$ST_RED" "$name" "$host" "DOWN" "$role" "$ST_RESET"
     fi
 
-    old_ifs="$IFS"
-    IFS=';'
-    for check_port in $check_ports; do
-      IFS="$old_ifs"
+    normalized_ports="$(_shell_tools_normalize_ports "$check_ports" 2>/dev/null || true)"
+    if [ -z "$normalized_ports" ]; then
+      printf "  %sinvalid port list:%s %s\n" "$ST_YELLOW" "$ST_RESET" "$check_ports"
+      continue
+    fi
+
+    printf "%s" "$normalized_ports" | tr ';' '\n' | while IFS= read -r check_port; do
       [ -n "$check_port" ] || continue
       if _shell_tools_port_open "$host" "$check_port"; then
         printf "  %sport %-6s OPEN%s\n" "$ST_GREEN" "$check_port" "$ST_RESET"
       else
         printf "  %sport %-6s CLOSED%s\n" "$ST_RED" "$check_port" "$ST_RESET"
       fi
-      IFS=';'
     done
-    IFS="$old_ifs"
 
     [ -n "$url" ] && printf "  %surl%s        %s\n" "$ST_CYAN" "$ST_RESET" "$url"
 
@@ -535,14 +789,52 @@ check-tools() {
   done
 }
 
+_shell_tools_remove_profile_hook() {
+  local profile="$1"
+  local tmp
+
+  [ -f "$profile" ] || return 0
+  tmp="${profile}.tmp.$$"
+  awk '
+    /# >>> shell-alias-tools >>>/ { skip = 1; next }
+    /# <<< shell-alias-tools <<</ { skip = 0; next }
+    !skip { print }
+  ' "$profile" > "$tmp"
+  mv "$tmp" "$profile"
+  printf "%sRemoved profile hook:%s %s\n" "$ST_GREEN" "$ST_RESET" "$profile"
+}
+
+shelluninstall() {
+  printf "\n%sShell Alias Tools uninstall%s\n" "$ST_CYAN" "$ST_RESET"
+
+  if ! _shell_tools_yes_no "Remove Shell Alias Tools from your shell profiles?" "yes"; then
+    return 0
+  fi
+
+  _shell_tools_remove_profile_hook "$HOME/.bashrc"
+  _shell_tools_remove_profile_hook "$HOME/.zshrc"
+  _shell_tools_remove_profile_hook "$HOME/.profile"
+
+  if _shell_tools_yes_no "Delete $SHELL_ALIAS_TOOLS_HOME including aliases and infra config?" "no"; then
+    rm -rf "$SHELL_ALIAS_TOOLS_HOME"
+    printf "%sDeleted:%s %s\n" "$ST_GREEN" "$ST_RESET" "$SHELL_ALIAS_TOOLS_HOME"
+  else
+    printf "%sKept:%s %s. SSH config is left untouched.\n" "$ST_YELLOW" "$ST_RESET" "$SHELL_ALIAS_TOOLS_HOME"
+  fi
+
+  echo "Restart the terminal to finish unloading the current session."
+}
+
 myhelp() {
   printf "\n%sCOMMANDS%s\n\n" "$ST_CYAN" "$ST_RESET"
   printf "init          Infra dashboard\n"
   printf "shellsetup    Interactive first-run setup\n"
   printf "infra-add     Add a server to infra config\n"
+  printf "infra-edit    Modify an infra server\n"
   printf "infra-list    List configured servers\n"
   printf "sshhosts      Pick an SSH host and connect\n"
   printf "check-tools   Check local CLI dependencies\n"
+  printf "shelluninstall Remove profile hook and optional data\n"
   printf "aa            Save the previous command as an alias\n"
   printf "laa           List aliases\n"
   printf "rma           Remove alias\n"
@@ -579,6 +871,7 @@ shell-tools-dashboard() {
   printf "init       -> infra dashboard\n"
   printf "sshhosts   -> connect to SSH host\n"
   printf "infra-add  -> add server\n"
+  printf "infra-edit -> modify server\n"
   printf "check-tools-> dependency check\n"
   printf "myhelp     -> all commands\n\n"
 }

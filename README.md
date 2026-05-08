@@ -37,6 +37,7 @@ bash install-macos.sh
 - Hooks the runtime into your PowerShell, Bash, or Zsh profile.
 - Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, and infra host count.
 - Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `fzf`, `jq`, `gh`, and `nc` where supported.
+- Asks dependency-by-dependency before installing optional tools such as `fzf`, `gh`, `docker`, and `multipass`.
 - Asks whether to enable inbound SSH on the new VM or machine.
 - Asks whether to generate an ed25519 SSH key.
 - Shows the public key and tells you how to copy it to the remote host.
@@ -50,9 +51,11 @@ bash install-macos.sh
 init          Infra dashboard and live host checks
 shellsetup    Interactive first-run setup
 infra-add     Add a server to infra config
+infra-edit    Modify an existing server
 infra-list    List configured servers
 sshhosts      Pick an SSH host and connect
 check-tools   Check local CLI dependencies
+shelluninstall Remove profile hook and optionally delete local data
 myhelp        Show all commands
 ```
 
@@ -95,6 +98,22 @@ proxmox,192.168.1.185,root,22,proxmox,22;8006,https://192.168.1.185:8006,true
 ```
 
 Roles are free text. If a host role contains `docker`, `init` will try a quick SSH Docker scan and print exposed container URLs.
+
+Ports can be entered with semicolons, commas, or spaces:
+
+```text
+22;8006
+22, 8006
+22 8006
+```
+
+They are normalized to `22;8006` before saving so Bash and macOS Zsh check each port separately.
+
+## macOS Notes
+
+Yes, `fzf` works on macOS. The installer can install it with Homebrew, and Shell Alias Tools uses the `fzf` command directly for `sshhosts` and `infra-edit`.
+
+Docker and Multipass are heavier desktop tools on macOS, so the installer asks before installing each one.
 
 ## Files
 

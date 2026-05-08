@@ -84,6 +84,127 @@ function Read-InstallDefault {
     return (Read-Host $Prompt).Trim()
 }
 
+function Test-InstallInfraName {
+    param([string]$Value)
+    return ($Value -match '^[A-Za-z][A-Za-z0-9._-]*$')
+}
+
+function Test-InstallIPv4 {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+
+    $parts = $Value.Trim() -split '\.'
+    if ($parts.Count -ne 4) {
+        return $false
+    }
+
+    foreach ($part in $parts) {
+        if ($part -notmatch '^\d{1,3}$') {
+            return $false
+        }
+
+        $number = [int]$part
+        if ($number -lt 0 -or $number -gt 255) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-InstallUser {
+    param([string]$Value)
+    return ($Value -match '^[A-Za-z0-9._-]+[$]?$')
+}
+
+function Test-InstallRole {
+    param([string]$Value)
+    return (-not [string]::IsNullOrWhiteSpace($Value) -and $Value -notmatch '[,\r\n]')
+}
+
+function Test-InstallUrl {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $true
+    }
+
+    $uri = $null
+    return [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri) -and $uri.Scheme -in @("http", "https")
+}
+
+function Test-InstallPort {
+    param([string]$Value)
+
+    if ($Value -notmatch '^\d+$') {
+        return $false
+    }
+
+    $port = [int]$Value
+    return ($port -ge 1 -and $port -le 65535)
+}
+
+function Convert-InstallPortList {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $null
+    }
+
+    $ports = @()
+    $items = $Value.Trim() -split '[;,\s]+' | Where-Object { $_ }
+    foreach ($item in $items) {
+        if (-not (Test-InstallPort $item)) {
+            return $null
+        }
+        $ports += ([int]$item).ToString()
+    }
+
+    if ($ports.Count -eq 0) {
+        return $null
+    }
+
+    return (($ports | Select-Object -Unique) -join ";")
+}
+
+function Read-InstallValidated {
+    param(
+        [string]$Prompt,
+        [string]$Default,
+        [scriptblock]$Validator,
+        [string]$ErrorMessage
+    )
+
+    while ($true) {
+        $value = Read-InstallDefault $Prompt $Default
+        if (& $Validator $value) {
+            return $value
+        }
+
+        Write-Warn $ErrorMessage
+    }
+}
+
+function Read-InstallPorts {
+    param(
+        [string]$Prompt,
+        [string]$Default
+    )
+
+    while ($true) {
+        $value = Read-InstallDefault $Prompt $Default
+        $normalized = Convert-InstallPortList $value
+        if ($normalized) {
+            return $normalized
+        }
+
+        Write-Warn "This is not a valid port list. Use values like 22;8006 or 22, 8006."
+    }
+}
+
 function Ensure-InstallFiles {
     if (-not (Test-Path $InstallDir)) {
         New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -146,37 +267,30 @@ function Add-ProfileHook {
 }
 
 function Install-Dependencies {
-    $tools = @("git", "ssh", "curl", "fzf", "gh")
-    $missing = @()
-
-    foreach ($tool in $tools) {
-        if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
-            $missing += $tool
-        }
-    }
-
-    if ($missing.Count -eq 0) {
-        Write-Ok "Recommended CLI tools are already present."
-        return
-    }
-
-    Write-Warn ("Missing recommended tools: {0}" -f ($missing -join ", "))
-    if (-not (Confirm-InstallChoice "Install recommended CLI dependencies with winget when possible?" $true)) {
-        return
-    }
-
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Warn "winget is not available. Install Git, OpenSSH Client, fzf, and GitHub CLI manually if needed."
-        return
-    }
-
     $wingetPackages = @{
-        git = "Git.Git"
-        fzf = "junegunn.fzf"
-        gh  = "GitHub.cli"
+        git       = "Git.Git"
+        fzf       = "junegunn.fzf"
+        gh        = "GitHub.cli"
+        jq        = "jqlang.jq"
+        docker    = "Docker.DockerDesktop"
+        multipass = "Canonical.Multipass"
     }
 
-    foreach ($tool in $missing) {
+    foreach ($tool in @("git", "ssh", "curl", "fzf", "jq", "gh", "docker", "multipass")) {
+        if (Get-Command $tool -ErrorAction SilentlyContinue) {
+            Write-Ok "$tool already installed."
+            continue
+        }
+
+        $default = $true
+        if ($tool -in @("docker", "multipass")) {
+            $default = $false
+        }
+
+        if (-not (Confirm-InstallChoice "Install missing dependency '$tool'?" $default)) {
+            continue
+        }
+
         if ($tool -eq "ssh") {
             if (Confirm-InstallChoice "Install the Windows OpenSSH Client capability?" $true) {
                 try {
@@ -186,6 +300,16 @@ function Install-Dependencies {
                     Write-Warn "OpenSSH Client install failed. You may need an elevated PowerShell session."
                 }
             }
+            continue
+        }
+
+        if ($tool -eq "curl") {
+            Write-Warn "curl is normally included with modern Windows. Please install it manually if this machine does not have it."
+            continue
+        }
+
+        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+            Write-Warn "winget is not available. Please install $tool manually."
             continue
         }
 
@@ -318,13 +442,13 @@ function Add-InfraHost {
     Write-Host ""
     Write-Step "Infra host onboarding"
 
-    $Name = Read-InstallDefault "Host alias" $Name
-    $HostName = Read-InstallDefault "Host/IP" $HostName
-    $User = Read-InstallDefault "SSH user" $User
-    $Port = [int](Read-InstallDefault "SSH port" ([string]$Port))
-    $Role = Read-InstallDefault "Role" $Role
-    $CheckPorts = Read-InstallDefault "Ports to check, separated by semicolon" $CheckPorts
-    $Url = Read-InstallDefault "Web URL, optional" $Url
+    $Name = Read-InstallValidated -Prompt "Host alias" -Default $Name -Validator ${function:Test-InstallInfraName} -ErrorMessage "Use a host alias like proxmox, docker-vm, or app01. Letters, numbers, dot, dash, underscore; start with a letter."
+    $HostName = Read-InstallValidated -Prompt "Host IPv4" -Default $HostName -Validator ${function:Test-InstallIPv4} -ErrorMessage "This is not an IPv4 address. Example: 192.168.1.185."
+    $User = Read-InstallValidated -Prompt "SSH user" -Default $User -Validator ${function:Test-InstallUser} -ErrorMessage "Use a simple SSH user, like root, ubuntu, admin, or adrien."
+    $Port = [int](Read-InstallValidated -Prompt "SSH port" -Default ([string]$Port) -Validator ${function:Test-InstallPort} -ErrorMessage "This is not a valid TCP port. Use a number from 1 to 65535.")
+    $Role = Read-InstallValidated -Prompt "Role" -Default $Role -Validator ${function:Test-InstallRole} -ErrorMessage "Role cannot be empty and cannot contain commas."
+    $CheckPorts = Read-InstallPorts -Prompt "Ports to check, separated by semicolon" -Default $CheckPorts
+    $Url = Read-InstallValidated -Prompt "Web URL, optional" -Default $Url -Validator ${function:Test-InstallUrl} -ErrorMessage "Use a full URL like https://192.168.1.185:8006, or leave it empty."
 
     $sshEnabled = $false
     if (Confirm-InstallChoice "Add this host to ~/.ssh/config?" $true) {

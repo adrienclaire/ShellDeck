@@ -127,6 +127,89 @@ read_default() {
   fi
 }
 
+valid_name() {
+  printf "%s" "$1" | grep -Eq '^[A-Za-z][A-Za-z0-9._-]*$'
+}
+
+valid_ipv4() {
+  printf "%s" "$1" |
+    awk -F. '
+      NF != 4 { exit 1 }
+      {
+        for (i = 1; i <= 4; i++) {
+          if ($i !~ /^[0-9][0-9]?[0-9]?$/ || $i < 0 || $i > 255) exit 1
+        }
+      }
+    '
+}
+
+valid_user() {
+  printf "%s" "$1" | grep -Eq '^[A-Za-z0-9._-]+[$]?$'
+}
+
+valid_role() {
+  [ -n "$1" ] && printf "%s" "$1" | grep -Eq '^[^,]+$'
+}
+
+valid_url() {
+  [ -z "$1" ] || printf "%s" "$1" | grep -Eq '^https?://[^[:space:],]+$'
+}
+
+valid_port() {
+  case "$1" in
+    ""|*[!0-9]*) return 1 ;;
+  esac
+  [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le 65535 ] 2>/dev/null
+}
+
+normalize_ports() {
+  printf "%s" "$1" |
+    tr ',;[:space:]' '\n' |
+    sed '/^$/d' |
+    awk '
+      $0 !~ /^[0-9]+$/ || $0 < 1 || $0 > 65535 { bad = 1; next }
+      !seen[$0]++ { out = out sep $0; sep = ";" }
+      END {
+        if (bad || out == "") exit 1
+        print out
+      }
+    '
+}
+
+read_validated() {
+  local prompt="$1"
+  local default="$2"
+  local validator="$3"
+  local error="$4"
+  local value
+
+  while true; do
+    value="$(read_default "$prompt" "$default")"
+    if "$validator" "$value"; then
+      printf "%s" "$value"
+      return
+    fi
+    warn "$error"
+  done
+}
+
+read_ports() {
+  local prompt="$1"
+  local default="$2"
+  local value
+  local normalized
+
+  while true; do
+    value="$(read_default "$prompt" "$default")"
+    normalized="$(normalize_ports "$value" 2>/dev/null || true)"
+    if [ -n "$normalized" ]; then
+      printf "%s" "$normalized"
+      return
+    fi
+    warn "This is not a valid port list. Use values like 22;8006 or 22, 8006."
+  done
+}
+
 detect_os() {
   if [ -n "$OS_OVERRIDE" ]; then
     case "$OS_OVERRIDE" in
@@ -226,28 +309,7 @@ install_profile_hook() {
   ok "Profile hook added: $profile"
 }
 
-install_linux_packages() {
-  local packages=""
-
-  if command -v apt-get >/dev/null 2>&1; then
-    packages="ca-certificates curl git openssh-client fzf jq netcat-openbsd"
-    sudo_cmd apt-get update
-    sudo_cmd apt-get install -y $packages
-  elif command -v dnf >/dev/null 2>&1; then
-    packages="ca-certificates curl git openssh-clients fzf jq nmap-ncat"
-    sudo_cmd dnf install -y $packages
-  elif command -v pacman >/dev/null 2>&1; then
-    packages="ca-certificates curl git openssh fzf jq gnu-netcat"
-    sudo_cmd pacman -Sy --needed --noconfirm $packages
-  elif command -v apk >/dev/null 2>&1; then
-    packages="ca-certificates curl git openssh-client fzf jq netcat-openbsd"
-    sudo_cmd apk add --no-cache $packages
-  else
-    warn "No supported package manager found. Please install: git curl ssh fzf jq nc"
-  fi
-}
-
-install_macos_packages() {
+ensure_homebrew() {
   if ! command -v brew >/dev/null 2>&1; then
     warn "Homebrew is not installed."
     if prompt_yes_no "Install Homebrew now?" "no"; then
@@ -257,37 +319,145 @@ install_macos_packages() {
       return
     fi
   fi
+}
 
-  if command -v brew >/dev/null 2>&1; then
-    brew install git fzf jq gh || true
+linux_package_for_tool() {
+  local tool="$1"
+  local manager="$2"
+
+  case "$manager:$tool" in
+    apt:git) printf "git" ;;
+    apt:ssh) printf "openssh-client" ;;
+    apt:curl) printf "curl" ;;
+    apt:fzf) printf "fzf" ;;
+    apt:jq) printf "jq" ;;
+    apt:nc) printf "netcat-openbsd" ;;
+    apt:gh) printf "gh" ;;
+    apt:docker) printf "docker.io" ;;
+    apt:multipass) printf "multipass" ;;
+    dnf:git) printf "git" ;;
+    dnf:ssh) printf "openssh-clients" ;;
+    dnf:curl) printf "curl" ;;
+    dnf:fzf) printf "fzf" ;;
+    dnf:jq) printf "jq" ;;
+    dnf:nc) printf "nmap-ncat" ;;
+    dnf:gh) printf "gh" ;;
+    dnf:docker) printf "docker" ;;
+    dnf:multipass) printf "multipass" ;;
+    pacman:git) printf "git" ;;
+    pacman:ssh) printf "openssh" ;;
+    pacman:curl) printf "curl" ;;
+    pacman:fzf) printf "fzf" ;;
+    pacman:jq) printf "jq" ;;
+    pacman:nc) printf "gnu-netcat" ;;
+    pacman:gh) printf "github-cli" ;;
+    pacman:docker) printf "docker" ;;
+    pacman:multipass) printf "multipass" ;;
+    apk:git) printf "git" ;;
+    apk:ssh) printf "openssh-client" ;;
+    apk:curl) printf "curl" ;;
+    apk:fzf) printf "fzf" ;;
+    apk:jq) printf "jq" ;;
+    apk:nc) printf "netcat-openbsd" ;;
+    apk:gh) printf "github-cli" ;;
+    apk:docker) printf "docker" ;;
+    apk:multipass) printf "" ;;
+    *) printf "" ;;
+  esac
+}
+
+detect_linux_package_manager() {
+  if command -v apt-get >/dev/null 2>&1; then
+    printf "apt"
+  elif command -v dnf >/dev/null 2>&1; then
+    printf "dnf"
+  elif command -v pacman >/dev/null 2>&1; then
+    printf "pacman"
+  elif command -v apk >/dev/null 2>&1; then
+    printf "apk"
   fi
+}
+
+install_linux_dependency() {
+  local tool="$1"
+  local manager="$2"
+  local package
+
+  if [ "$tool" = "multipass" ] && command -v snap >/dev/null 2>&1; then
+    sudo_cmd snap install multipass
+    return
+  fi
+
+  package="$(linux_package_for_tool "$tool" "$manager")"
+  if [ -z "$package" ]; then
+    warn "No known package mapping for $tool on this Linux distribution."
+    return
+  fi
+
+  case "$manager" in
+    apt) sudo_cmd apt-get install -y "$package" ;;
+    dnf) sudo_cmd dnf install -y "$package" ;;
+    pacman) sudo_cmd pacman -Sy --needed --noconfirm "$package" ;;
+    apk) sudo_cmd apk add --no-cache "$package" ;;
+  esac
+}
+
+install_macos_dependency() {
+  local tool="$1"
+
+  ensure_homebrew
+  command -v brew >/dev/null 2>&1 || return
+
+  case "$tool" in
+    docker) brew install --cask docker ;;
+    multipass) brew install --cask multipass ;;
+    ssh) brew install openssh ;;
+    nc) brew install netcat ;;
+    *) brew install "$tool" ;;
+  esac
 }
 
 install_dependencies() {
   local os="$1"
-  local missing=""
+  local manager=""
   local tool
+  local default
 
-  for tool in git ssh curl fzf jq nc; do
-    if ! command -v "$tool" >/dev/null 2>&1; then
-      missing="$missing $tool"
+  if [ "$os" = "linux" ]; then
+    manager="$(detect_linux_package_manager)"
+    if [ -n "$manager" ] && [ "$manager" = "apt" ]; then
+      sudo_cmd apt-get update
     fi
+  fi
+
+  for tool in git ssh curl fzf jq nc gh docker multipass; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      ok "$tool already installed."
+      continue
+    fi
+
+    default="yes"
+    case "$tool" in
+      docker|multipass) default="no" ;;
+    esac
+
+    if ! prompt_yes_no "Install missing dependency '$tool'?" "$default"; then
+      continue
+    fi
+
+    case "$os" in
+      linux)
+        if [ -z "$manager" ]; then
+          warn "No supported package manager found. Please install $tool manually."
+        else
+          install_linux_dependency "$tool" "$manager" || warn "Could not install $tool automatically."
+        fi
+        ;;
+      macos)
+        install_macos_dependency "$tool" || warn "Could not install $tool automatically."
+        ;;
+    esac
   done
-
-  if [ -z "$missing" ]; then
-    ok "Recommended CLI tools are already present."
-    return
-  fi
-
-  warn "Missing recommended tools:$missing"
-  if ! prompt_yes_no "Install recommended CLI dependencies?" "yes"; then
-    return
-  fi
-
-  case "$os" in
-    linux) install_linux_packages ;;
-    macos) install_macos_packages ;;
-  esac
 }
 
 enable_ssh_server_linux() {
@@ -388,13 +558,13 @@ add_infra_host() {
   local hosts_file="$INSTALL_DIR/infra-hosts.csv"
   local tmp
 
-  name="$(read_default "Host alias" "$name")"
-  host="$(read_default "Host/IP" "$host")"
-  user="$(read_default "SSH user" "$user")"
-  port="$(read_default "SSH port" "$port")"
-  role="$(read_default "Role" "$role")"
-  check_ports="$(read_default "Ports to check, semicolon separated" "$check_ports")"
-  url="$(read_default "Web URL, optional" "$url")"
+  name="$(read_validated "Host alias" "$name" valid_name "Use a host alias like proxmox, docker-vm, or app01. Letters, numbers, dot, dash, underscore; start with a letter.")"
+  host="$(read_validated "Host IPv4" "$host" valid_ipv4 "This is not an IPv4 address. Example: 192.168.1.185.")"
+  user="$(read_validated "SSH user" "$user" valid_user "Use a simple SSH user, like root, ubuntu, admin, or adrien.")"
+  port="$(read_validated "SSH port" "$port" valid_port "This is not a valid TCP port. Use a number from 1 to 65535.")"
+  role="$(read_validated "Role" "$role" valid_role "Role cannot be empty and cannot contain commas.")"
+  check_ports="$(read_ports "Ports to check, semicolon separated" "$check_ports")"
+  url="$(read_validated "Web URL, optional" "$url" valid_url "Use a full URL like https://192.168.1.185:8006, or leave it empty.")"
 
   if prompt_yes_no "Add this host to ~/.ssh/config?" "yes"; then
     ssh_enabled="true"
