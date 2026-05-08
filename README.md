@@ -100,21 +100,22 @@ SSH access? yes/no
   SSH port
   Add to ~/.ssh/config? yes/no
 Docker on this host? yes/no
-Service port? yes/no
-  8000
-  8222
+Service endpoint? yes/no
+  Protocol: http or https
+  Port: 8000
+  Port: 8222
 ```
 
 Hosts are stored as CSV:
 
 ```csv
 Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services
-server1,192.168.1.187,true,admin,22,true,true,http://192.168.1.187:8000;http://192.168.1.187:8222
+server1,192.168.1.187,true,admin,22,true,true,http://192.168.1.187:8000;https://192.168.1.187:8222
 ```
 
 If Docker is enabled and the host has SSH access, `init` will run `docker ps` over SSH and print exposed container URLs. It uses the SSH config alias when available, otherwise it connects with `ssh -p <port> <user>@<ip>`.
 
-When adding a service to a host, enter only the port. For host `192.168.1.187`, entering `8000` saves `http://192.168.1.187:8000`.
+When adding a service to a host, enter the protocol and the port. For host `192.168.1.187`, protocol `https` with port `8222` saves `https://192.168.1.187:8222`.
 
 ## macOS Notes
 

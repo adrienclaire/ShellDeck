@@ -298,6 +298,17 @@ _shell_tools_valid_url() {
   [ -z "$1" ] || printf "%s" "$1" | grep -Eq '^https?://[^[:space:],]+$'
 }
 
+_shell_tools_normalize_protocol() {
+  printf "%s" "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+_shell_tools_valid_protocol() {
+  case "$(_shell_tools_normalize_protocol "$1")" in
+    http|https) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 _shell_tools_valid_service_address() {
   local value="$1"
   local port
@@ -428,6 +439,7 @@ _shell_tools_read_services() {
   local host="$1"
   local existing="${2:-}"
   local services=""
+  local service_protocol
   local service_port
   local normalized
 
@@ -440,15 +452,17 @@ _shell_tools_read_services() {
     fi
   fi
 
-  if ! _shell_tools_yes_no "Do you want to add a service port?" "yes"; then
+  if ! _shell_tools_yes_no "Do you want to add a service endpoint?" "yes"; then
     printf ""
     return 0
   fi
 
   while true; do
+    service_protocol="$(_shell_tools_read_validated "Service protocol, http or https" "http" _shell_tools_valid_protocol "Use http or https.")"
+    service_protocol="$(_shell_tools_normalize_protocol "$service_protocol")"
     service_port="$(_shell_tools_read_default "Service port, example 8000, 80, 8222" "")"
     if _shell_tools_valid_port "$service_port"; then
-      normalized="http://$host:$service_port"
+      normalized="$service_protocol://$host:$service_port"
       if [ -z "$services" ]; then
         services="$normalized"
       else
@@ -459,7 +473,7 @@ _shell_tools_read_services() {
       continue
     fi
 
-    _shell_tools_yes_no "Add another service port?" "no" || break
+    _shell_tools_yes_no "Add another service endpoint?" "no" || break
   done
 
   printf "%s" "$services"
