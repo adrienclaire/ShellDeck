@@ -446,6 +446,9 @@ install_dependencies() {
   local manager=""
   local tool
   local default
+  local status
+  local install_label
+  local command_path
   local required_tools="git ssh curl fzf jq nc"
   local optional_tools="gh docker multipass"
 
@@ -456,13 +459,24 @@ install_dependencies() {
     fi
   fi
 
+  info "Dependency setup"
+  info "You will be asked about each dependency directly."
+
   for tool in $required_tools; do
+    status="missing"
+    command_path=""
     if command -v "$tool" >/dev/null 2>&1; then
-      ok "$tool already installed."
-      continue
+      command_path="$(command -v "$tool")"
+      status="installed at $command_path"
     fi
 
-    if ! prompt_yes_no "Install required dependency '$tool'?" "yes"; then
+    default="yes"
+    if [ -n "$command_path" ]; then
+      default="no"
+    fi
+
+    install_label="Install/update required dependency '$tool'? ($status)"
+    if ! prompt_yes_no "$install_label" "$default"; then
       warn "$tool is required for the best Shell Alias Tools experience. Some commands may fall back or fail."
       continue
     fi
@@ -482,17 +496,20 @@ install_dependencies() {
   done
 
   for tool in $optional_tools; do
+    status="missing"
+    command_path=""
     if command -v "$tool" >/dev/null 2>&1; then
-      ok "$tool already installed."
-      continue
+      command_path="$(command -v "$tool")"
+      status="installed at $command_path"
     fi
 
     default="yes"
-    case "$tool" in
-      docker|multipass) default="no" ;;
-    esac
+    if [ -n "$command_path" ] || [ "$tool" = "docker" ] || [ "$tool" = "multipass" ]; then
+      default="no"
+    fi
 
-    if ! prompt_yes_no "Install optional dependency '$tool'?" "$default"; then
+    install_label="Install/update optional dependency '$tool'? ($status)"
+    if ! prompt_yes_no "$install_label" "$default"; then
       continue
     fi
 

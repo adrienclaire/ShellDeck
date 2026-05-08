@@ -37,7 +37,7 @@ bash install-macos.sh
 - Hooks the runtime into your PowerShell, Bash, or Zsh profile.
 - Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, and infra host count.
 - Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `fzf`, `jq`, `gh`, and `nc` where supported.
-- Asks dependency-by-dependency before installing optional tools such as `fzf`, `gh`, `docker`, and `multipass`.
+- Shows a dependency checklist every install and asks directly about `git`, `ssh`, `curl`, `fzf`, `jq`, `nc`, `gh`, `docker`, and `multipass`.
 - Asks whether to enable inbound SSH on the new VM or machine.
 - Asks whether to generate an ed25519 SSH key.
 - Shows the public key and tells you how to copy it to the remote host.
