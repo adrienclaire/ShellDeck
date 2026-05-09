@@ -189,6 +189,7 @@ function Install-WindowsDependency {
         bat       = "sharkdp.bat"
         eza       = "eza-community.eza"
         zoxide    = "ajeetdsouza.zoxide"
+        starship  = "Starship.Starship"
         ripgrep   = "BurntSushi.ripgrep.MSVC"
         fd        = "sharkdp.fd"
         jq        = "jqlang.jq"
@@ -244,7 +245,7 @@ function Install-WindowsDependency {
 function Install-Dependencies {
     $requiredTools = @(
         "git", "ssh", "curl", "wget", "fzf", "bash-completion", "bat", "eza", "zoxide",
-        "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
+        "starship", "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
         "btop", "htop", "duf", "neovim"
     )
     $optionalTools = @("gh", "docker", "multipass")

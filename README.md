@@ -36,8 +36,8 @@ bash install-macos.sh
 - Installs the shell runtime into `~/.shell-alias-tools`.
 - Hooks the runtime into your PowerShell, Bash, or Zsh profile.
 - Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, and infra host count.
-- Turns Bash into a smarter daily shell with clean shared history, Bash completion, fzf key bindings, a colored Git-aware prompt, modern file listing, pretty file reading, smart directory jumping, fuzzy file picking, archive extraction, port inspection, and safe fallbacks.
-- Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `wget`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `ripgrep`, `fd`, `jq`, `yq`, `nc`, `tree`, `unzip`, `zip`, `rsync`, `tmux`, `btop`, `htop`, `duf`, `neovim`, `gh`, `docker`, and `multipass` where supported.
+- Turns Bash into a smarter daily shell with clean shared history, Bash completion, fzf key bindings, a Starship prompt, modern file listing, pretty file reading, smart directory jumping, fuzzy file picking, archive extraction, port inspection, and safe fallbacks.
+- Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `wget`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `starship`, `ripgrep`, `fd`, `jq`, `yq`, `nc`, `tree`, `unzip`, `zip`, `rsync`, `tmux`, `btop`, `htop`, `duf`, `neovim`, `gh`, `docker`, and `multipass` where supported.
 - Shows a dependency checklist every install and asks directly before installing each tool.
 - Asks whether to enable inbound SSH on the new VM or machine.
 - Asks whether to generate an ed25519 SSH key.
@@ -74,6 +74,7 @@ please        Re-run the previous command with sudo
 extract       Extract common archive formats
 serve         Start a quick HTTP file server
 ports         Show listening TCP/UDP ports
+dps/dcu/dcd/dcl Docker ps, compose up/down/logs
 duh           Show first-level disk usage sorted by size
 pathlist      Print PATH one entry per line
 sysupdate     Update the VM with the detected package manager
@@ -97,9 +98,9 @@ shopt -s histappend cmdhist checkwinsize
 PROMPT_COMMAND='history -a; history -c; history -r'
 ```
 
-It sources `bash-completion` when installed, loads fzf key bindings and completion from common Linux and Homebrew paths, initializes zoxide, adds a compact colored prompt with Git branch awareness, and defines modern aliases only when they do not already exist. Existing custom aliases saved with `aa` still win.
+It sources `bash-completion` when installed, loads fzf key bindings and completion from common Linux and Homebrew paths, initializes zoxide, activates Starship when installed, and falls back to a compact colored prompt with Git branch awareness when Starship is unavailable. Existing custom aliases saved with `aa` still win.
 
-The target VM tool belt is intentionally broad but still Bash-compatible: file navigation (`eza`, `zoxide`, `fd`, `ripgrep`, `fzf`), file reading/editing (`bat`, `neovim`), JSON/YAML (`jq`, `yq`), ops visibility (`btop`, `htop`, `duf`, `ports`), remote/dev basics (`ssh`, `rsync`, `tmux`, `gh`), and infra extras (`docker`, `multipass`) when you accept them.
+The target VM tool belt is intentionally broad but still Bash-compatible: file navigation (`eza`, `zoxide`, `fd`, `ripgrep`, `fzf`), prompt/theme (`starship`), file reading/editing (`bat`, `neovim`), JSON/YAML (`jq`, `yq`), ops visibility (`btop`, `htop`, `duf`, `ports`), remote/dev basics (`ssh`, `rsync`, `tmux`, `gh`), and infra extras (`docker`, `multipass`) when you accept them.
 
 The Windows PowerShell installer mirrors the same neutral infra setup and smart tool checklist through `winget` where a reliable native package exists. Defaults are generic: `server1`, `admin`, port `22`, and an IPv4 prompt example like `192.168.1.X`.
 

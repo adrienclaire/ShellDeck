@@ -367,7 +367,7 @@ function Get-ShellToolsToolPath {
 function Get-ShellToolsSmartToolList {
     return @(
         "git", "ssh", "curl", "wget", "fzf", "bash-completion", "bat", "eza", "zoxide",
-        "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
+        "starship", "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
         "btop", "htop", "duf", "neovim", "gh", "docker", "multipass"
     )
 }
@@ -1048,6 +1048,15 @@ function catp {
     }
 }
 
+function cat {
+    if (Get-Command bat -ErrorAction SilentlyContinue) {
+        bat @args
+    }
+    else {
+        Get-Content @args
+    }
+}
+
 function mkcd {
     param([Parameter(Mandatory = $true)][string]$Path)
     New-Item -ItemType Directory -Force -Path $Path | Out-Null
@@ -1174,7 +1183,34 @@ function ports {
 
 function dps {
     if (Get-Command docker -ErrorAction SilentlyContinue) {
-        docker ps --format "table {{.Names}}`t{{.Status}}`t{{.Ports}}"
+        docker ps @args
+    }
+    else {
+        Write-Host "Docker is missing. Run check-tools, then install Docker if this machine should use it." -ForegroundColor Yellow
+    }
+}
+
+function dcu {
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        docker compose up -d @args
+    }
+    else {
+        Write-Host "Docker is missing. Run check-tools, then install Docker if this machine should use it." -ForegroundColor Yellow
+    }
+}
+
+function dcd {
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        docker compose down @args
+    }
+    else {
+        Write-Host "Docker is missing. Run check-tools, then install Docker if this machine should use it." -ForegroundColor Yellow
+    }
+}
+
+function dcl {
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        docker compose logs -f @args
     }
     else {
         Write-Host "Docker is missing. Run check-tools, then install Docker if this machine should use it." -ForegroundColor Yellow
@@ -1223,15 +1259,20 @@ function g {
 }
 
 function gs {
-    git status --short --branch
+    git status
 }
 
 function ga {
-    git add @args
+    if ($args.Count -gt 0) {
+        git add @args
+    }
+    else {
+        git add .
+    }
 }
 
 function gc {
-    git commit @args
+    git commit -m @args
 }
 
 function gp {
@@ -1287,7 +1328,7 @@ function myhelp {
     Write-Host "check-tools   Check local CLI dependencies"
     Write-Host "shelluninstall Remove profile hook and optional data"
     Write-Host "ll/la/l/lt    Smart listing via eza when available"
-    Write-Host "catp          Pretty file reading via bat when available"
+    Write-Host "cat/catp      Pretty file reading via bat when available"
     Write-Host "cdf           Fuzzy cd into a directory with fzf"
     Write-Host "ff            Fuzzy find a file with preview"
     Write-Host "fe            Fuzzy find a file and open it in editor"
@@ -1296,7 +1337,7 @@ function myhelp {
     Write-Host "extract       Extract common archive formats"
     Write-Host "serve         Start a quick HTTP file server"
     Write-Host "ports         Show listening TCP ports"
-    Write-Host "dps           Show Docker containers"
+    Write-Host "dps/dcu/dcd/dcl Docker ps, compose up/down/logs"
     Write-Host "pathlist      Print PATH one entry per line"
     Write-Host "sysupdate     Update with winget"
     Write-Host "ep            Edit PowerShell profile"
@@ -1372,7 +1413,27 @@ function Get-ShellToolsGitBranch {
     return ""
 }
 
-if ($env:SHELL_TOOLS_NO_PROMPT -ne "1") {
+function Enable-ShellToolsStarship {
+    if ($env:SHELL_TOOLS_NO_PROMPT -eq "1") {
+        return $false
+    }
+
+    if (-not (Get-Command starship -ErrorAction SilentlyContinue)) {
+        return $false
+    }
+
+    try {
+        Invoke-Expression (&starship init powershell)
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+$script:ShellToolsStarshipReady = Enable-ShellToolsStarship
+
+if ($env:SHELL_TOOLS_NO_PROMPT -ne "1" -and -not $script:ShellToolsStarshipReady) {
     function global:prompt {
         $branch = Get-ShellToolsGitBranch
         Write-Host ("{0}@{1} " -f $env:USERNAME, $env:COMPUTERNAME) -NoNewline -ForegroundColor Cyan
@@ -1382,6 +1443,12 @@ if ($env:SHELL_TOOLS_NO_PROMPT -ne "1") {
         }
         Write-Host ""
         return "PS> "
+    }
+}
+
+foreach ($shellToolsAlias in @("cat", "g", "gs", "ga", "gc", "gp", "gl", "gd", "ll", "la", "l", "lt", "dps", "dcu", "dcd", "dcl")) {
+    if (Test-Path "Alias:$shellToolsAlias") {
+        Remove-Item "Alias:$shellToolsAlias" -Force -ErrorAction SilentlyContinue
     }
 }
 

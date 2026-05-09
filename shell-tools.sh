@@ -135,7 +135,7 @@ _shell_tools_sort_human() {
 }
 
 _shell_tools_smart_tool_list() {
-  printf "%s\n" git ssh curl wget fzf bash-completion bat eza zoxide ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim gh docker multipass
+  printf "%s\n" git ssh curl wget fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim gh docker multipass
 }
 
 _shell_tools_bat_command() {
@@ -224,6 +224,22 @@ _shell_tools_configure_zoxide() {
   export SHELL_TOOLS_ZOXIDE_READY=1
 }
 
+_shell_tools_configure_starship() {
+  [ "${SHELL_TOOLS_NO_PROMPT:-}" = "1" ] && return 1
+  command -v starship >/dev/null 2>&1 || return 1
+  [ "${SHELL_TOOLS_STARSHIP_READY:-}" = "1" ] && return 0
+
+  if [ -n "${BASH_VERSION:-}" ]; then
+    eval "$(starship init bash 2>/dev/null)" || return 1
+  elif [ -n "${ZSH_VERSION:-}" ]; then
+    eval "$(starship init zsh 2>/dev/null)" || return 1
+  else
+    return 1
+  fi
+
+  export SHELL_TOOLS_STARSHIP_READY=1
+}
+
 _shell_tools_git_branch() {
   local branch
 
@@ -238,6 +254,7 @@ _shell_tools_git_branch() {
 _shell_tools_configure_prompt() {
   [ -n "${BASH_VERSION:-}" ] || return 0
   [ "${SHELL_TOOLS_NO_PROMPT:-}" = "1" ] && return 0
+  [ "${SHELL_TOOLS_STARSHIP_READY:-}" = "1" ] && return 0
 
   PS1='\[\033[1;36m\]\u@\h\[\033[0m\] \[\033[1;34m\]\w\[\033[33m\]$(_shell_tools_git_branch)\[\033[0m\]\n\$ '
 }
@@ -253,9 +270,9 @@ _shell_tools_apply_smart_aliases() {
   local bat_cmd
 
   if command -v eza >/dev/null 2>&1; then
-    _shell_tools_alias_default ll "eza -lah --git --icons=auto --group-directories-first"
-    _shell_tools_alias_default la "eza -a --icons=auto --group-directories-first"
-    _shell_tools_alias_default l "eza --icons=auto --group-directories-first"
+    _shell_tools_alias_default ll "eza -lah --icons"
+    _shell_tools_alias_default la "eza -a"
+    _shell_tools_alias_default l "eza"
     _shell_tools_alias_default lt "eza --tree --level=2 --icons=auto --git"
   else
     _shell_tools_alias_default ll "ls -lah"
@@ -265,7 +282,7 @@ _shell_tools_apply_smart_aliases() {
 
   bat_cmd="$(_shell_tools_bat_command || true)"
   if [ -n "$bat_cmd" ]; then
-    _shell_tools_alias_default cat "$bat_cmd --paging=never --style=plain"
+    _shell_tools_alias_default cat "$bat_cmd"
     _shell_tools_alias_default catp "$bat_cmd --paging=always"
   fi
 
@@ -274,13 +291,13 @@ _shell_tools_apply_smart_aliases() {
   _shell_tools_alias_default h "history"
   _shell_tools_alias_default j "jobs -l"
   _shell_tools_alias_default g "git"
-  _shell_tools_alias_default gs "git status --short --branch"
-  _shell_tools_alias_default ga "git add"
-  _shell_tools_alias_default gc "git commit"
+  _shell_tools_alias_default gs "git status"
+  _shell_tools_alias_default ga "git add ."
+  _shell_tools_alias_default gc "git commit -m"
   _shell_tools_alias_default gp "git push"
   _shell_tools_alias_default gl "git log --oneline --graph --decorate --all -20"
   _shell_tools_alias_default gd "git diff"
-  _shell_tools_alias_default myip "curl -4 ifconfig.me"
+  _shell_tools_alias_default myip "curl ifconfig.me"
   _shell_tools_alias_default dfh "df -h"
   _shell_tools_alias_default .. "cd .."
   _shell_tools_alias_default ... "cd ../.."
@@ -292,7 +309,7 @@ _shell_tools_configure_smart_shell() {
   _shell_tools_configure_completion
   _shell_tools_configure_fzf
   _shell_tools_configure_zoxide
-  _shell_tools_configure_prompt
+  _shell_tools_configure_starship || _shell_tools_configure_prompt
   _shell_tools_apply_smart_aliases
 }
 
@@ -427,7 +444,7 @@ serve() {
 
 ports() {
   if command -v ss >/dev/null 2>&1; then
-    ss -tulpen
+    ss -tulnp
   elif command -v netstat >/dev/null 2>&1; then
     netstat -tulpen 2>/dev/null || netstat -an
   else
@@ -438,7 +455,34 @@ ports() {
 
 dps() {
   if command -v docker >/dev/null 2>&1; then
-    docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+    docker ps "$@"
+  else
+    echo "Docker is missing. Run check-tools, then install Docker if this VM should use it."
+    return 1
+  fi
+}
+
+dcu() {
+  if command -v docker >/dev/null 2>&1; then
+    docker compose up -d "$@"
+  else
+    echo "Docker is missing. Run check-tools, then install Docker if this VM should use it."
+    return 1
+  fi
+}
+
+dcd() {
+  if command -v docker >/dev/null 2>&1; then
+    docker compose down "$@"
+  else
+    echo "Docker is missing. Run check-tools, then install Docker if this VM should use it."
+    return 1
+  fi
+}
+
+dcl() {
+  if command -v docker >/dev/null 2>&1; then
+    docker compose logs -f "$@"
   else
     echo "Docker is missing. Run check-tools, then install Docker if this VM should use it."
     return 1
@@ -1496,6 +1540,7 @@ myhelp() {
   printf "extract       Extract common archive formats\n"
   printf "serve         Start a quick HTTP file server\n"
   printf "ports         Show listening TCP/UDP ports\n"
+  printf "dps/dcu/dcd/dcl Docker ps, compose up/down/logs\n"
   printf "duh           Show first-level disk usage sorted by size\n"
   printf "pathlist      Print PATH one entry per line\n"
   printf "sysupdate     Update the VM with the detected package manager\n"

@@ -359,6 +359,7 @@ linux_package_for_tool() {
     apt:bat) printf "bat" ;;
     apt:eza) printf "eza" ;;
     apt:zoxide) printf "zoxide" ;;
+    apt:starship) printf "starship" ;;
     apt:ripgrep) printf "ripgrep" ;;
     apt:fd) printf "fd-find" ;;
     apt:jq) printf "jq" ;;
@@ -385,6 +386,7 @@ linux_package_for_tool() {
     dnf:bat) printf "bat" ;;
     dnf:eza) printf "eza" ;;
     dnf:zoxide) printf "zoxide" ;;
+    dnf:starship) printf "starship" ;;
     dnf:ripgrep) printf "ripgrep" ;;
     dnf:fd) printf "fd-find" ;;
     dnf:jq) printf "jq" ;;
@@ -411,6 +413,7 @@ linux_package_for_tool() {
     pacman:bat) printf "bat" ;;
     pacman:eza) printf "eza" ;;
     pacman:zoxide) printf "zoxide" ;;
+    pacman:starship) printf "starship" ;;
     pacman:ripgrep) printf "ripgrep" ;;
     pacman:fd) printf "fd" ;;
     pacman:jq) printf "jq" ;;
@@ -437,6 +440,7 @@ linux_package_for_tool() {
     apk:bat) printf "bat" ;;
     apk:eza) printf "eza" ;;
     apk:zoxide) printf "zoxide" ;;
+    apk:starship) printf "starship" ;;
     apk:ripgrep) printf "ripgrep" ;;
     apk:fd) printf "fd" ;;
     apk:jq) printf "jq" ;;
@@ -489,6 +493,29 @@ install_linux_dependency() {
   local tool="$1"
   local manager="$2"
   local package
+
+  if [ "$tool" = "starship" ]; then
+    package="$(linux_package_for_tool "$tool" "$manager")"
+    if [ -n "$package" ]; then
+      case "$manager" in
+        apt) sudo_cmd apt-get install -y "$package" && return ;;
+        dnf) sudo_cmd dnf install -y "$package" && return ;;
+        pacman) sudo_cmd pacman -Sy --needed --noconfirm "$package" && return ;;
+        apk) sudo_cmd apk add --no-cache "$package" && return ;;
+      esac
+    fi
+
+    if command -v curl >/dev/null 2>&1 && prompt_yes_no "Package install failed for Starship. Use the official Starship installer?" "yes"; then
+      if [ "$(id -u)" -eq 0 ]; then
+        curl -fsSL https://starship.rs/install.sh | sh -s -- -y
+      else
+        curl -fsSL https://starship.rs/install.sh | sudo sh -s -- -y
+      fi
+    else
+      return 1
+    fi
+    return
+  fi
 
   if [ "$tool" = "multipass" ] && command -v snap >/dev/null 2>&1; then
     sudo_cmd snap install multipass
@@ -570,7 +597,7 @@ install_dependencies() {
   local status
   local install_label
   local command_path
-  local required_tools="git ssh curl wget fzf bash-completion bat eza zoxide ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim"
+  local required_tools="git ssh curl wget fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim"
   local optional_tools="gh docker multipass"
 
   if [ "$os" = "linux" ]; then
