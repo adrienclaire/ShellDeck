@@ -952,6 +952,12 @@ function add-func {
         [string]$body
     )
 
+    if ($env:SHELL_TOOLS_ENABLE_CUSTOM_FUNCTIONS -ne "1") {
+        Write-Host "add-func is disabled by default because it stores executable PowerShell code." -ForegroundColor Yellow
+        Write-Host "Enable it with: `$env:SHELL_TOOLS_ENABLE_CUSTOM_FUNCTIONS='1'" -ForegroundColor Yellow
+        return
+    }
+
     Ensure-ShellToolsHome
 
     if (Get-Command $name -ErrorAction SilentlyContinue) {
@@ -1231,6 +1237,12 @@ function sysupdate {
 }
 
 function please {
+    if ($env:SHELL_TOOLS_ENABLE_PLEASE -ne "1") {
+        Write-Host "please is disabled by default because it re-runs history elevated." -ForegroundColor Yellow
+        Write-Host "Enable it with: `$env:SHELL_TOOLS_ENABLE_PLEASE='1'" -ForegroundColor Yellow
+        return
+    }
+
     $last = (Get-History -Count 1).CommandLine
     if (-not $last) {
         Write-Host "No previous command found." -ForegroundColor Yellow
@@ -1333,7 +1345,7 @@ function myhelp {
     Write-Host "ff            Fuzzy find a file with preview"
     Write-Host "fe            Fuzzy find a file and open it in editor"
     Write-Host "mkcd          Create a directory and cd into it"
-    Write-Host "please        Re-run the previous command elevated"
+    Write-Host "please        Re-run the previous command elevated (opt-in)"
     Write-Host "extract       Extract common archive formats"
     Write-Host "serve         Start a quick HTTP file server"
     Write-Host "ports         Show listening TCP ports"

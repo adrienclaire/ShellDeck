@@ -1,5 +1,9 @@
 * text=auto
 
+.gitattributes text eol=lf
 *.sh text eol=lf
-*.ps1 text eol=crlf
+*.ps1 text eol=lf
 *.md text eol=lf
+*.yml text eol=lf
+VERSION text eol=lf
+checksums.txt text eol=lf

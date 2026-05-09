@@ -322,6 +322,12 @@ _shell_tools_configure_smart_shell() {
 please() {
   local cmd
 
+  if [ "${SHELL_TOOLS_ENABLE_PLEASE:-0}" != "1" ]; then
+    echo "please is disabled by default because it re-runs history with sudo."
+    echo "Enable it with: export SHELL_TOOLS_ENABLE_PLEASE=1"
+    return 1
+  fi
+
   cmd="$(fc -ln -2 -2 2>/dev/null | sed 's/^[[:space:]]*//')"
   [ -n "$cmd" ] || cmd="$(fc -ln -1 2>/dev/null | sed 's/^[[:space:]]*//')"
   if [ -z "$cmd" ]; then
@@ -1542,7 +1548,7 @@ myhelp() {
   printf "ff            Fuzzy find a file with preview\n"
   printf "fe            Fuzzy find a file and open it in editor\n"
   printf "mkcd          Create a directory and cd into it\n"
-  printf "please        Re-run the previous command with sudo\n"
+  printf "please        Re-run the previous command with sudo (opt-in)\n"
   printf "extract       Extract common archive formats\n"
   printf "serve         Start a quick HTTP file server\n"
   printf "ports         Show listening TCP/UDP ports\n"

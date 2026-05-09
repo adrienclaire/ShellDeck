@@ -1,27 +1,39 @@
-# Shell Alias Tools
+# ShellDeck
 
-Cross-platform shell bootstrap for fresh VMs, workstations, and homelab nodes.
+Cross-platform smart shell bootstrap and infra dashboard for fresh VMs, workstations, and homelab nodes.
 
-It installs a profile runtime that turns your terminal startup into a small infra dashboard, keeps personal aliases/functions in one place, and helps onboard SSH hosts such as Proxmox, Docker VMs, and app servers.
+ShellDeck is the public app name for this repo, which is still hosted as `Shell-Alias-Tools` for compatibility with the existing install URLs. It installs a profile runtime that turns your terminal startup into a small infra dashboard, keeps personal aliases/functions in one place, and helps onboard SSH hosts such as Proxmox, Docker VMs, and app servers.
 
 ## One-command install
 
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/install.ps1 -OutFile install.ps1
+.\install.ps1
 ```
 
 ### Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/main/install.sh | bash
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/install.sh
+bash install.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/main/install.sh | bash
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/install.sh
+bash install.sh
+```
+
+To verify checksums first:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/checksums.txt
+sha256sum -c --ignore-missing checksums.txt
+bash install.sh
 ```
 
 The Linux/macOS installer also has explicit local wrappers:
@@ -71,7 +83,7 @@ cdf           Fuzzy cd into a directory with fzf
 ff            Fuzzy find a file with preview
 fe            Fuzzy find a file and open it in editor
 mkcd          Create a directory and cd into it
-please        Re-run the previous command with sudo
+please        Re-run the previous command with sudo (opt-in)
 extract       Extract common archive formats
 serve         Start a quick HTTP file server
 ports         Show listening TCP/UDP ports
@@ -111,6 +123,7 @@ Windows:
 
 ```powershell
 .\install.ps1 -Yes
+.\install.ps1 -DryRun
 .\install.ps1 -Mode basic
 .\install.ps1 -Mode complete
 .\install.ps1 -Mode manual
@@ -122,6 +135,7 @@ Linux/macOS:
 
 ```bash
 bash install.sh --yes
+bash install.sh --dry-run
 bash install.sh --mode basic
 bash install.sh --mode complete
 bash install.sh --mode manual
@@ -139,6 +153,15 @@ Manual   Ask before installing each dependency.
 
 On apt-based Linux systems, the installer runs `apt-get update`, counts available upgrades, and asks before running `apt-get upgrade -y`.
 
+`--dry-run` / `-DryRun` previews file writes, package installs, profile hooks, SSH setup, and Linux security actions without changing the system.
+
+## Safety Defaults
+
+- `please` is disabled by default because it re-runs shell history with elevated privileges. Enable it with `SHELL_TOOLS_ENABLE_PLEASE=1`.
+- PowerShell `add-func` is disabled by default because it stores executable function bodies. Enable it with `SHELL_TOOLS_ENABLE_CUSTOM_FUNCTIONS=1`.
+- The Starship remote installer fallback is opt-in. Set `SHELL_TOOLS_ALLOW_REMOTE_INSTALLERS=1` or answer yes when prompted.
+- Tagged install URLs are recommended for production. `main` is for development.
+
 ## Linux Security Setup
 
 After dependency setup on Linux, the installer can guide:
@@ -150,7 +173,7 @@ After dependency setup on Linux, the installer can guide:
 - fail2ban SSH jail settings: port, retry count, find window, and ban time.
 - Optional TOTP MFA through PAM for SSH, local console login, or both.
 
-MFA setup uses `google-authenticator` where available. It keeps `nullok` by default during rollout so an unenrolled user is not locked out unless you explicitly choose to require MFA immediately. Passkey/PAM U2F setup is not automated yet because it needs per-user hardware key enrollment and mapping.
+When you run the installer over SSH, UFW enablement defaults to no after warning you about lockout risk. MFA setup uses `google-authenticator` where available and validates `sshd -t` before reloading SSH. It keeps `nullok` by default during rollout so an unenrolled user is not locked out unless you explicitly choose to require MFA immediately. Passkey/PAM U2F setup is not automated yet because it needs per-user hardware key enrollment and mapping.
 
 ## Infra Config
 
@@ -183,13 +206,25 @@ When adding a service to a host, enter the protocol and the port. For host `192.
 
 ## macOS Notes
 
-Yes, `fzf` works on macOS. The installer treats it as a required dependency for the best experience and can install it with Homebrew. Shell Alias Tools uses `fzf` directly for `sshhosts` and `infra-edit`.
+Yes, `fzf` works on macOS. The installer treats it as a required dependency for the best experience and can install it with Homebrew. ShellDeck uses `fzf` directly for `sshhosts` and `infra-edit`.
 
 Docker and Multipass are heavier desktop tools on macOS. Complete mode installs them; Manual mode asks before each one; Basic mode skips them.
+
+## Production Readiness
+
+- CI parses Bash on Ubuntu/macOS and PowerShell on Ubuntu/Windows.
+- CI runs high-confidence secret-pattern checks.
+- ShellCheck runs as an advisory job while the scripts continue to mature.
+- Release installs should use tagged URLs and checksum verification.
+- `SECURITY.md` documents risky features, Linux hardening behavior, and vulnerability reporting.
 
 ## Files
 
 ```text
+VERSION            Current release version
+CHANGELOG.md       Release notes
+SECURITY.md        Security policy and safe install guidance
+checksums.txt      SHA256 checksums for release artifacts
 install.ps1        Windows installer
 install.sh         Linux/macOS installer
 install-linux.sh   Linux wrapper

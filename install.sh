@@ -1,24 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RAW_BASE="${SHELL_ALIAS_TOOLS_RAW_BASE:-https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/main}"
+SHELL_TOOLS_VERSION="${SHELL_TOOLS_VERSION:-0.1.0}"
+SHELL_ALIAS_TOOLS_REF="${SHELL_ALIAS_TOOLS_REF:-v$SHELL_TOOLS_VERSION}"
+RAW_BASE="${SHELL_ALIAS_TOOLS_RAW_BASE:-https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/$SHELL_ALIAS_TOOLS_REF}"
 INSTALL_DIR="${SHELL_ALIAS_TOOLS_HOME:-$HOME/.shell-alias-tools}"
 ASSUME_YES=0
 SKIP_DEPS=0
 SKIP_INFRA=0
+DRY_RUN=0
 OS_OVERRIDE=""
 INSTALL_MODE=""
 
 usage() {
   cat <<'USAGE'
-Shell Alias Tools installer for Linux and macOS.
+ShellDeck installer for Linux and macOS.
 
 Usage:
-  bash install.sh [--yes] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
+  bash install.sh [--yes] [--dry-run] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
 
 Examples:
-  curl -fsSL https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/main/install.sh | bash
-  curl -fsSL https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/main/install.sh | bash -s -- --yes
+  curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/install.sh && bash install.sh
+  bash install.sh --dry-run
 USAGE
 }
 
@@ -26,6 +29,9 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --yes|-y)
       ASSUME_YES=1
+      ;;
+    --dry-run)
+      DRY_RUN=1
       ;;
     --skip-deps)
       SKIP_DEPS=1
@@ -84,6 +90,12 @@ ok() {
 
 warn() {
   color "33" "$*" >&2
+}
+
+dry_run() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    color "35" "[dry-run] $*" >&2
+  fi
 }
 
 prompt_yes_no() {
@@ -306,6 +318,11 @@ detect_os() {
 }
 
 sudo_cmd() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would run: $*"
+    return 0
+  fi
+
   if [ "$(id -u)" -eq 0 ]; then
     "$@"
   else
@@ -330,6 +347,11 @@ download_file() {
 copy_runtime() {
   local script_path
   local script_dir
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would create $INSTALL_DIR and install shell-tools.sh, aliases.sh, and infra-hosts.csv"
+    return
+  fi
 
   mkdir -p "$INSTALL_DIR"
   script_path="${BASH_SOURCE[0]:-$0}"
@@ -370,6 +392,11 @@ profile_candidates() {
 install_profile_hook() {
   local profile="$1"
   local source_line
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would add shell profile hook to $profile"
+    return
+  fi
 
   mkdir -p "$(dirname "$profile")"
   touch "$profile"
@@ -547,6 +574,12 @@ detect_linux_package_manager() {
 apt_update_and_offer_upgrade() {
   local upgrades
 
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would run apt-get update"
+    dry_run "would count available upgrades and ask before apt-get upgrade -y"
+    return
+  fi
+
   sudo_cmd apt-get update
 
   upgrades="$(apt list --upgradable 2>/dev/null | sed '1d' | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
@@ -575,13 +608,14 @@ install_linux_dependency() {
       esac
     fi
 
-    if command -v curl >/dev/null 2>&1 && prompt_yes_no "Package install failed for Starship. Use the official Starship installer?" "yes"; then
+    if command -v curl >/dev/null 2>&1 && { [ "${SHELL_TOOLS_ALLOW_REMOTE_INSTALLERS:-0}" = "1" ] || prompt_yes_no "Package install failed for Starship. Use the official Starship installer?" "no"; }; then
       if [ "$(id -u)" -eq 0 ]; then
         curl -fsSL https://starship.rs/install.sh | sh -s -- -y
       else
         curl -fsSL https://starship.rs/install.sh | sudo sh -s -- -y
       fi
     else
+      warn "Starship remote installer skipped. Set SHELL_TOOLS_ALLOW_REMOTE_INSTALLERS=1 to allow it non-interactively."
       return 1
     fi
     return
@@ -609,6 +643,17 @@ install_linux_dependency() {
 install_macos_dependency() {
   local tool="$1"
   local required="${2:-yes}"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    case "$tool" in
+      docker|multipass) dry_run "would run: brew install --cask $tool" ;;
+      bash-completion) dry_run "would run: brew install bash-completion@2" ;;
+      ssh) dry_run "would run: brew install openssh" ;;
+      nc) dry_run "would run: brew install netcat" ;;
+      *) dry_run "would run: brew install $tool" ;;
+    esac
+    return
+  fi
 
   ensure_homebrew "$required"
   command -v brew >/dev/null 2>&1 || return
@@ -895,6 +940,10 @@ valid_firewall_protocol() {
   esac
 }
 
+running_over_ssh() {
+  [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_CLIENT:-}" ]
+}
+
 ufw_allow_port_rule() {
   local port="$1"
   local protocol="$2"
@@ -926,6 +975,11 @@ ufw_allow_icmp() {
   fi
 
   rule="-A ufw-before-input ${source_arg}-p icmp --icmp-type echo-request -j ACCEPT"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would add ICMP echo-request rule to $before_rules: $rule"
+    return
+  fi
 
   if [ ! -f "$before_rules" ]; then
     warn "UFW before.rules was not found. Install/configure ufw first."
@@ -964,7 +1018,7 @@ configure_ufw_firewall() {
   local protocol
   local source
 
-  if ! command -v ufw >/dev/null 2>&1; then
+  if [ "$DRY_RUN" -eq 0 ] && ! command -v ufw >/dev/null 2>&1; then
     warn "UFW is not installed, skipping firewall configuration."
     return
   fi
@@ -1005,7 +1059,15 @@ configure_ufw_firewall() {
     esac
   done
 
-  if prompt_yes_no "Enable UFW now?" "yes"; then
+  if running_over_ssh; then
+    warn "Active SSH session detected. Enabling UFW can disconnect you if the SSH rule is wrong."
+    if ! prompt_yes_no "I allowed the active SSH port and want to enable UFW now" "no"; then
+      warn "UFW rules were prepared, but UFW was not enabled."
+      sudo_cmd ufw status verbose || true
+      return
+    fi
+    sudo_cmd ufw --force enable
+  elif prompt_yes_no "Enable UFW now?" "yes"; then
     sudo_cmd ufw --force enable
   fi
 
@@ -1020,7 +1082,7 @@ configure_fail2ban() {
   local findtime
   local bantime
 
-  if ! command -v fail2ban-client >/dev/null 2>&1 && ! command -v fail2ban-server >/dev/null 2>&1; then
+  if [ "$DRY_RUN" -eq 0 ] && ! command -v fail2ban-client >/dev/null 2>&1 && ! command -v fail2ban-server >/dev/null 2>&1; then
     warn "fail2ban is not installed, skipping fail2ban configuration."
     return
   fi
@@ -1033,6 +1095,12 @@ configure_fail2ban() {
   maxretry="$(read_validated "Max SSH retries before ban" "5" valid_positive_int "Use a positive number.")"
   findtime="$(read_validated "Find time window (examples: 10m, 1h)" "10m" valid_fail2ban_duration "Use a value like 10m, 1h, or 3600.")"
   bantime="$(read_validated "Ban time (examples: 1h, 24h)" "1h" valid_fail2ban_duration "Use a value like 1h, 24h, or 3600.")"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would write $jail_file with sshd port=$ssh_port maxretry=$maxretry findtime=$findtime bantime=$bantime"
+    dry_run "would enable/restart fail2ban and check fail2ban-client status sshd"
+    return
+  fi
 
   tmp="$(mktemp)"
   {
@@ -1068,6 +1136,11 @@ pam_add_google_authenticator() {
   local pam_file="/etc/pam.d/$service"
   local tmp
 
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would prepend '$module_line' to $pam_file after creating a backup"
+    return
+  fi
+
   if [ ! -f "$pam_file" ]; then
     warn "PAM file not found: $pam_file"
     return 1
@@ -1084,7 +1157,9 @@ pam_add_google_authenticator() {
     cat "$pam_file"
   } > "$tmp"
 
-  sudo_cmd cp "$pam_file" "${pam_file}.shell-alias-tools.bak"
+  if [ ! -f "${pam_file}.shell-alias-tools.bak" ]; then
+    sudo_cmd cp "$pam_file" "${pam_file}.shell-alias-tools.bak"
+  fi
   sudo_cmd cp "$tmp" "$pam_file"
   rm -f "$tmp"
   ok "PAM MFA enabled for $service."
@@ -1095,6 +1170,11 @@ sshd_set_option() {
   local value="$2"
   local file="/etc/ssh/sshd_config"
   local tmp
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would set $key $value in $file after creating a backup"
+    return
+  fi
 
   if [ ! -f "$file" ]; then
     warn "sshd_config was not found. Install/enable the SSH server first."
@@ -1122,12 +1202,51 @@ sshd_set_option() {
     }
   ' "$file" > "$tmp"
 
-  sudo_cmd cp "$file" "${file}.shell-alias-tools.bak"
+  if [ ! -f "${file}.shell-alias-tools.bak" ]; then
+    sudo_cmd cp "$file" "${file}.shell-alias-tools.bak"
+  fi
   sudo_cmd cp "$tmp" "$file"
   rm -f "$tmp"
 }
 
+validate_sshd_config() {
+  local sshd_cmd=""
+  local file="/etc/ssh/sshd_config"
+  local backup="${file}.shell-alias-tools.bak"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would validate sshd config with sshd -t before reloading SSH"
+    return 0
+  fi
+
+  sshd_cmd="$(command -v sshd 2>/dev/null || true)"
+  if [ -z "$sshd_cmd" ] && [ -x /usr/sbin/sshd ]; then
+    sshd_cmd="/usr/sbin/sshd"
+  fi
+
+  if [ -z "$sshd_cmd" ]; then
+    warn "Could not find sshd to validate config. Skipping SSH reload."
+    return 1
+  fi
+
+  if sudo_cmd "$sshd_cmd" -t; then
+    return 0
+  fi
+
+  warn "sshd config validation failed."
+  if [ -f "$backup" ]; then
+    sudo_cmd cp "$backup" "$file"
+    warn "Restored $file from $backup."
+  fi
+  return 1
+}
+
 reload_ssh_service() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would reload ssh/sshd"
+    return
+  fi
+
   if command -v systemctl >/dev/null 2>&1; then
     sudo_cmd systemctl reload ssh 2>/dev/null || sudo_cmd systemctl reload sshd 2>/dev/null || true
   else
@@ -1151,7 +1270,7 @@ configure_linux_mfa() {
     fi
   fi
 
-  if ! command -v google-authenticator >/dev/null 2>&1; then
+  if [ "$DRY_RUN" -eq 0 ] && ! command -v google-authenticator >/dev/null 2>&1; then
     warn "google-authenticator is not available on this system. Skipping MFA setup."
     return
   fi
@@ -1171,7 +1290,9 @@ configure_linux_mfa() {
     module_line="auth required pam_google_authenticator.so"
   fi
 
-  if prompt_yes_no "Run google-authenticator now for user $(id -un)?" "yes"; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would run google-authenticator for user $(id -un) if requested"
+  elif prompt_yes_no "Run google-authenticator now for user $(id -un)?" "yes"; then
     if [ -e /dev/tty ]; then
       google-authenticator < /dev/tty
     else
@@ -1185,7 +1306,11 @@ configure_linux_mfa() {
       sshd_set_option "UsePAM" "yes" || true
       sshd_set_option "KbdInteractiveAuthentication" "yes" || true
       sshd_set_option "ChallengeResponseAuthentication" "yes" || true
-      reload_ssh_service
+      if validate_sshd_config; then
+        reload_ssh_service
+      else
+        warn "SSH service was not reloaded because validation failed."
+      fi
       ;;
   esac
 
@@ -1321,7 +1446,10 @@ main() {
   local mode="basic"
 
   os="$(detect_os)"
-  info "Installing Shell Alias Tools for $os..."
+  info "Installing ShellDeck for $os..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    warn "Dry run enabled: no files, packages, profiles, firewall rules, services, or PAM files will be changed."
+  fi
 
   copy_runtime
 
@@ -1337,8 +1465,15 @@ main() {
     configure_linux_security "$os"
   fi
 
-  if [ "$SKIP_INFRA" -eq 0 ]; then
+  if [ "$SKIP_INFRA" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
     configure_infra
+  elif [ "$SKIP_INFRA" -eq 0 ]; then
+    dry_run "would load the runtime and offer interactive infra host setup"
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    ok "Dry run complete."
+    return
   fi
 
   ok "Install complete."

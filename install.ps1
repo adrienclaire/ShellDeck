@@ -3,16 +3,19 @@ param(
     [switch]$Yes,
     [switch]$SkipDeps,
     [switch]$SkipInfra,
+    [switch]$DryRun,
     [string]$Mode = "",
     [string]$InstallDir = $(if ($env:SHELL_ALIAS_TOOLS_HOME) { $env:SHELL_ALIAS_TOOLS_HOME } else { Join-Path $HOME ".shell-alias-tools" })
 )
 
 $ErrorActionPreference = "Stop"
+$ShellToolsVersion = if ($env:SHELL_TOOLS_VERSION) { $env:SHELL_TOOLS_VERSION } else { "0.1.0" }
+$ShellAliasToolsRef = if ($env:SHELL_ALIAS_TOOLS_REF) { $env:SHELL_ALIAS_TOOLS_REF } else { "v$ShellToolsVersion" }
 $RawBase = if ($env:SHELL_ALIAS_TOOLS_RAW_BASE) {
     $env:SHELL_ALIAS_TOOLS_RAW_BASE
 }
 else {
-    "https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/main"
+    "https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/$ShellAliasToolsRef"
 }
 
 function Write-Step {
@@ -28,6 +31,13 @@ function Write-Ok {
 function Write-Warn {
     param([string]$Message)
     Write-Host $Message -ForegroundColor Yellow
+}
+
+function Write-DryRun {
+    param([string]$Message)
+    if ($DryRun) {
+        Write-Host "[dry-run] $Message" -ForegroundColor Magenta
+    }
 }
 
 function Confirm-InstallChoice {
@@ -164,6 +174,11 @@ function Get-InstallToolPath {
 }
 
 function Ensure-InstallFiles {
+    if ($DryRun) {
+        Write-DryRun "would create $InstallDir and install shell-tools.ps1, aliases.ps1, and infra-hosts.csv"
+        return (Join-Path $InstallDir "shell-tools.ps1")
+    }
+
     if (-not (Test-Path $InstallDir)) {
         New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     }
@@ -195,6 +210,11 @@ function Ensure-InstallFiles {
 
 function Add-ProfileHook {
     param([Parameter(Mandatory = $true)][string]$RuntimePath)
+
+    if ($DryRun) {
+        Write-DryRun "would add ShellDeck profile hook to $PROFILE"
+        return
+    }
 
     $profilePath = $PROFILE
     $profileDir = Split-Path $profilePath
@@ -251,6 +271,11 @@ function Install-WindowsDependency {
     }
 
     if ($Tool -eq "ssh") {
+        if ($DryRun) {
+            Write-DryRun "would install Windows OpenSSH Client capability"
+            return
+        }
+
         if ($Auto -or (Confirm-InstallChoice "Install the Windows OpenSSH Client capability?" $true)) {
             try {
                 Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0 | Out-Null
@@ -272,13 +297,18 @@ function Install-WindowsDependency {
         return
     }
 
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Warn "winget is not available. Please install $Tool manually."
+    if (-not $wingetPackages.ContainsKey($Tool)) {
+        Write-Warn "No winget package mapping is configured for $Tool."
         return
     }
 
-    if (-not $wingetPackages.ContainsKey($Tool)) {
-        Write-Warn "No winget package mapping is configured for $Tool."
+    if ($DryRun) {
+        Write-DryRun "would run: winget install --id $($wingetPackages[$Tool]) --exact --accept-source-agreements --accept-package-agreements"
+        return
+    }
+
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Warn "winget is not available. Please install $Tool manually."
         return
     }
 
@@ -361,6 +391,11 @@ function Enable-LocalSshServer {
         return
     }
 
+    if ($DryRun) {
+        Write-DryRun "would install OpenSSH.Server capability, start sshd, set automatic startup, and allow TCP/22 through Windows Firewall"
+        return
+    }
+
     try {
         Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
         Start-Service sshd
@@ -380,6 +415,11 @@ function Enable-LocalSshServer {
 function Configure-Infra {
     param([string]$RuntimePath)
 
+    if ($DryRun) {
+        Write-DryRun "would load $RuntimePath and offer interactive infra host setup"
+        return
+    }
+
     $previousNoDashboard = $env:SHELL_TOOLS_NO_DASHBOARD
     $env:SHELL_TOOLS_NO_DASHBOARD = "1"
     . $RuntimePath
@@ -391,7 +431,10 @@ function Configure-Infra {
 }
 
 function Main {
-    Write-Step "Installing Shell Alias Tools for Windows..."
+    Write-Step "Installing ShellDeck for Windows..."
+    if ($DryRun) {
+        Write-Warn "Dry run enabled: no files, packages, profiles, services, or firewall rules will be changed."
+    }
 
     $runtimePath = Ensure-InstallFiles
     Add-ProfileHook -RuntimePath $runtimePath
@@ -404,6 +447,11 @@ function Main {
 
     if (-not $SkipInfra) {
         Configure-Infra -RuntimePath $runtimePath
+    }
+
+    if ($DryRun) {
+        Write-Ok "Dry run complete."
+        return
     }
 
     Write-Ok "Install complete."
