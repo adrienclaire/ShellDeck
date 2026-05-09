@@ -2,36 +2,36 @@
 
 Cross-platform smart shell bootstrap and infra dashboard for fresh VMs, workstations, and homelab nodes.
 
-ShellDeck is the public app name for this repo, which is still hosted as `Shell-Alias-Tools` for compatibility with the existing install URLs. It installs a profile runtime that turns your terminal startup into a small infra dashboard, keeps personal aliases/functions in one place, and helps onboard SSH hosts such as Proxmox, Docker VMs, and app servers.
+ShellDeck installs a profile runtime that turns your terminal startup into a small infra dashboard, keeps personal aliases/functions in one place, and helps onboard SSH hosts such as Proxmox, Docker VMs, and app servers.
 
 ## One-command install
 
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.2/install.ps1 -OutFile install.ps1
 .\install.ps1
 ```
 
 ### Linux
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.2/install.sh
 bash install.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.2/install.sh
 bash install.sh
 ```
 
 To verify checksums first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.2/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.2/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```

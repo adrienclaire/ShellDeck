@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 - 2026-05-09
+
+- Updated release links and installer defaults for the renamed `adrienclaire/ShellDeck` repository.
+- Updated GitHub repository metadata for the new ShellDeck project identity.
+
 ## 0.1.1 - 2026-05-09
 
 - Fixed CI workflow issues found by the first production-readiness run.

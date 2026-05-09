@@ -9,13 +9,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ShellToolsVersion = if ($env:SHELL_TOOLS_VERSION) { $env:SHELL_TOOLS_VERSION } else { "0.1.1" }
+$ShellToolsVersion = if ($env:SHELL_TOOLS_VERSION) { $env:SHELL_TOOLS_VERSION } else { "0.1.2" }
 $ShellAliasToolsRef = if ($env:SHELL_ALIAS_TOOLS_REF) { $env:SHELL_ALIAS_TOOLS_REF } else { "v$ShellToolsVersion" }
 $RawBase = if ($env:SHELL_ALIAS_TOOLS_RAW_BASE) {
     $env:SHELL_ALIAS_TOOLS_RAW_BASE
 }
 else {
-    "https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/$ShellAliasToolsRef"
+    "https://raw.githubusercontent.com/adrienclaire/ShellDeck/$ShellAliasToolsRef"
 }
 
 function Write-Step {

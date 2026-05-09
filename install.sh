@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SHELL_TOOLS_VERSION="${SHELL_TOOLS_VERSION:-0.1.1}"
+SHELL_TOOLS_VERSION="${SHELL_TOOLS_VERSION:-0.1.2}"
 SHELL_ALIAS_TOOLS_REF="${SHELL_ALIAS_TOOLS_REF:-v$SHELL_TOOLS_VERSION}"
-RAW_BASE="${SHELL_ALIAS_TOOLS_RAW_BASE:-https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/$SHELL_ALIAS_TOOLS_REF}"
+RAW_BASE="${SHELL_ALIAS_TOOLS_RAW_BASE:-https://raw.githubusercontent.com/adrienclaire/ShellDeck/$SHELL_ALIAS_TOOLS_REF}"
 INSTALL_DIR="${SHELL_ALIAS_TOOLS_HOME:-$HOME/.shell-alias-tools}"
 ASSUME_YES=0
 SKIP_DEPS=0
@@ -20,7 +20,7 @@ Usage:
   bash install.sh [--yes] [--dry-run] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
 
 Examples:
-  curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/install.sh && bash install.sh
+  curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.2/install.sh && bash install.sh
   bash install.sh --dry-run
 USAGE
 }
