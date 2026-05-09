@@ -9,29 +9,29 @@ ShellDeck is the public app name for this repo, which is still hosted as `Shell-
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/install.ps1 -OutFile install.ps1
 .\install.ps1
 ```
 
 ### Linux
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/install.sh
 bash install.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/install.sh
 bash install.sh
 ```
 
 To verify checksums first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.0/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/v0.1.1/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```

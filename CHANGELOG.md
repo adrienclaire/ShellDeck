@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 - 2026-05-09
+
+- Fixed CI workflow issues found by the first production-readiness run.
+- Kept ShellCheck advisory non-blocking while preserving parser and security checks as blocking gates.
+
 ## 0.1.0 - 2026-05-09
 
 - First production-readiness baseline for ShellDeck.

@@ -1,4 +1,5 @@
-# Shell Alias Tools - Bash/Zsh profile runtime
+# shellcheck shell=bash
+# ShellDeck - Bash/Zsh profile runtime
 # Source this file from ~/.bashrc or ~/.zshrc.
 
 export SHELL_ALIAS_TOOLS_HOME="${SHELL_ALIAS_TOOLS_HOME:-$HOME/.shell-alias-tools}"
