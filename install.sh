@@ -7,13 +7,14 @@ ASSUME_YES=0
 SKIP_DEPS=0
 SKIP_INFRA=0
 OS_OVERRIDE=""
+INSTALL_MODE=""
 
 usage() {
   cat <<'USAGE'
 Shell Alias Tools installer for Linux and macOS.
 
 Usage:
-  bash install.sh [--yes] [--skip-deps] [--skip-infra] [--os linux|macos]
+  bash install.sh [--yes] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/adrienclaire/Shell-Alias-Tools/main/install.sh | bash
@@ -32,8 +33,22 @@ while [ $# -gt 0 ]; do
     --skip-infra)
       SKIP_INFRA=1
       ;;
+    --mode)
+      shift
+      if [ $# -eq 0 ]; then
+        echo "Missing value for --mode" >&2
+        usage
+        exit 1
+      fi
+      INSTALL_MODE="${1:-}"
+      ;;
     --os)
       shift
+      if [ $# -eq 0 ]; then
+        echo "Missing value for --os" >&2
+        usage
+        exit 1
+      fi
       OS_OVERRIDE="${1:-}"
       ;;
     --help|-h)
@@ -68,7 +83,7 @@ ok() {
 }
 
 warn() {
-  color "33" "$*"
+  color "33" "$*" >&2
 }
 
 prompt_yes_no() {
@@ -231,6 +246,49 @@ read_ports() {
   done
 }
 
+normalize_install_mode() {
+  case "$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')" in
+    1|b|basic) printf "basic" ;;
+    2|c|complete|complet|full) printf "complete" ;;
+    3|m|manual) printf "manual" ;;
+    *) return 1 ;;
+  esac
+}
+
+choose_install_mode() {
+  local choice
+  local normalized
+
+  if [ -n "$INSTALL_MODE" ]; then
+    normalized="$(normalize_install_mode "$INSTALL_MODE" 2>/dev/null || true)"
+    if [ -n "$normalized" ]; then
+      printf "%s" "$normalized"
+      return
+    fi
+    warn "Unknown install mode '$INSTALL_MODE'. Use basic, complete, or manual." >&2
+  fi
+
+  if [ "$ASSUME_YES" -eq 1 ]; then
+    printf "basic"
+    return
+  fi
+
+  info "Setup mode" >&2
+  printf "  1) Basic    - install required smart-shell dependencies automatically\n" >&2
+  printf "  2) Complete - install required dependencies plus Docker, Multipass, and GitHub CLI\n" >&2
+  printf "  3) Manual   - ask before installing every dependency\n" >&2
+
+  while true; do
+    choice="$(read_default "Choose setup mode" "1")"
+    normalized="$(normalize_install_mode "$choice" 2>/dev/null || true)"
+    if [ -n "$normalized" ]; then
+      printf "%s" "$normalized"
+      return
+    fi
+    warn "Choose 1 for Basic, 2 for Complete, or 3 for Manual." >&2
+  done
+}
+
 detect_os() {
   if [ -n "$OS_OVERRIDE" ]; then
     case "$OS_OVERRIDE" in
@@ -374,6 +432,9 @@ linux_package_for_tool() {
     apt:htop) printf "htop" ;;
     apt:duf) printf "duf" ;;
     apt:neovim) printf "neovim" ;;
+    apt:ufw) printf "ufw" ;;
+    apt:fail2ban) printf "fail2ban" ;;
+    apt:google-authenticator) printf "libpam-google-authenticator" ;;
     apt:gh) printf "gh" ;;
     apt:docker) printf "docker.io" ;;
     apt:multipass) printf "multipass" ;;
@@ -401,6 +462,9 @@ linux_package_for_tool() {
     dnf:htop) printf "htop" ;;
     dnf:duf) printf "duf" ;;
     dnf:neovim) printf "neovim" ;;
+    dnf:ufw) printf "ufw" ;;
+    dnf:fail2ban) printf "fail2ban" ;;
+    dnf:google-authenticator) printf "google-authenticator" ;;
     dnf:gh) printf "gh" ;;
     dnf:docker) printf "docker" ;;
     dnf:multipass) printf "multipass" ;;
@@ -428,6 +492,9 @@ linux_package_for_tool() {
     pacman:htop) printf "htop" ;;
     pacman:duf) printf "duf" ;;
     pacman:neovim) printf "neovim" ;;
+    pacman:ufw) printf "ufw" ;;
+    pacman:fail2ban) printf "fail2ban" ;;
+    pacman:google-authenticator) printf "libpam-google-authenticator" ;;
     pacman:gh) printf "github-cli" ;;
     pacman:docker) printf "docker" ;;
     pacman:multipass) printf "multipass" ;;
@@ -455,6 +522,9 @@ linux_package_for_tool() {
     apk:htop) printf "htop" ;;
     apk:duf) printf "duf" ;;
     apk:neovim) printf "neovim" ;;
+    apk:ufw) printf "ufw" ;;
+    apk:fail2ban) printf "fail2ban" ;;
+    apk:google-authenticator) printf "" ;;
     apk:gh) printf "github-cli" ;;
     apk:docker) printf "docker" ;;
     apk:multipass) printf "" ;;
@@ -583,6 +653,9 @@ dependency_path() {
     neovim)
       command -v nvim 2>/dev/null
       ;;
+    fail2ban)
+      command -v fail2ban-client 2>/dev/null || command -v fail2ban-server 2>/dev/null
+      ;;
     *)
       command -v "$tool" 2>/dev/null
       ;;
@@ -591,6 +664,7 @@ dependency_path() {
 
 install_dependencies() {
   local os="$1"
+  local mode="$2"
   local manager=""
   local tool
   local default
@@ -601,6 +675,10 @@ install_dependencies() {
   local optional_tools="gh docker multipass"
 
   if [ "$os" = "linux" ]; then
+    required_tools="$required_tools ufw fail2ban"
+  fi
+
+  if [ "$os" = "linux" ]; then
     manager="$(detect_linux_package_manager)"
     if [ -n "$manager" ] && [ "$manager" = "apt" ]; then
       apt_update_and_offer_upgrade
@@ -608,8 +686,17 @@ install_dependencies() {
   fi
 
   info "Dependency setup"
-  info "On a new VM, answer yes to the smart-shell dependencies for the full cockpit experience."
-  info "You will be asked about each dependency directly."
+  case "$mode" in
+    basic)
+      info "Basic mode: installing required smart-shell dependencies automatically."
+      ;;
+    complete)
+      info "Complete mode: installing required dependencies plus Docker, Multipass, and GitHub CLI."
+      ;;
+    manual)
+      info "Manual mode: you will be asked about every dependency."
+      ;;
+  esac
 
   for tool in $required_tools; do
     status="missing"
@@ -619,15 +706,22 @@ install_dependencies() {
       status="installed at $command_path"
     fi
 
-    default="yes"
-    if [ -n "$command_path" ]; then
-      default="no"
-    fi
+    if [ "$mode" = "manual" ]; then
+      default="yes"
+      if [ -n "$command_path" ]; then
+        default="no"
+      fi
 
-    install_label="Install/update smart-shell dependency '$tool'? ($status)"
-    if ! prompt_yes_no "$install_label" "$default"; then
-      warn "$tool is required for the best Shell Alias Tools experience. Some commands may fall back or fail."
+      install_label="Install/update smart-shell dependency '$tool'? ($status)"
+      if ! prompt_yes_no "$install_label" "$default"; then
+        warn "$tool is required for the best Shell Alias Tools experience. Some commands may fall back or fail."
+        continue
+      fi
+    elif [ -n "$command_path" ]; then
+      ok "$tool already installed ($command_path)"
       continue
+    else
+      info "Installing required dependency: $tool"
     fi
 
     case "$os" in
@@ -644,6 +738,11 @@ install_dependencies() {
     esac
   done
 
+  if [ "$mode" = "basic" ]; then
+    info "Basic mode skips optional dependencies: $optional_tools"
+    return
+  fi
+
   for tool in $optional_tools; do
     status="missing"
     command_path=""
@@ -652,14 +751,21 @@ install_dependencies() {
       status="installed at $command_path"
     fi
 
-    default="yes"
-    if [ -n "$command_path" ] || [ "$tool" = "docker" ] || [ "$tool" = "multipass" ]; then
-      default="no"
-    fi
+    if [ "$mode" = "manual" ]; then
+      default="yes"
+      if [ -n "$command_path" ] || [ "$tool" = "docker" ] || [ "$tool" = "multipass" ]; then
+        default="no"
+      fi
 
-    install_label="Install/update optional dependency '$tool'? ($status)"
-    if ! prompt_yes_no "$install_label" "$default"; then
+      install_label="Install/update optional dependency '$tool'? ($status)"
+      if ! prompt_yes_no "$install_label" "$default"; then
+        continue
+      fi
+    elif [ -n "$command_path" ]; then
+      ok "$tool already installed ($command_path)"
       continue
+    else
+      info "Installing optional dependency: $tool"
     fi
 
     case "$os" in
@@ -711,6 +817,396 @@ configure_local_ssh_server() {
     linux) enable_ssh_server_linux ;;
     macos) enable_ssh_server_macos ;;
   esac
+}
+
+valid_positive_int() {
+  case "$1" in
+    ""|*[!0-9]*) return 1 ;;
+  esac
+  [ "$1" -ge 1 ] 2>/dev/null
+}
+
+valid_fail2ban_duration() {
+  printf "%s" "$1" | grep -Eq '^[0-9]+[smhdw]?$'
+}
+
+valid_firewall_source() {
+  local value="$1"
+  local ip
+  local prefix
+
+  value="$(printf "%s" "$value" | tr '[:upper:]' '[:lower:]')"
+
+  case "$value" in
+    ""|*[[:space:]]*|*";"*|*","*) return 1 ;;
+    "*"|any) return 0 ;;
+  esac
+
+  if printf "%s" "$value" | grep -Eq '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.\*$'; then
+    ip="${value%.*}.0"
+    valid_ipv4 "$ip"
+    return
+  fi
+
+  case "$value" in
+    */*)
+      ip="${value%/*}"
+      prefix="${value#*/}"
+      valid_ipv4 "$ip" || return 1
+      case "$prefix" in ""|*[!0-9]*) return 1 ;; esac
+      [ "$prefix" -ge 0 ] 2>/dev/null && [ "$prefix" -le 32 ] 2>/dev/null
+      ;;
+    *)
+      valid_ipv4 "$value"
+      ;;
+  esac
+}
+
+normalize_firewall_source() {
+  local value="$1"
+
+  value="$(printf "%s" "$value" | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    "*"|any) printf "any" ;;
+    *.*.*.\*) printf "%s.0/24" "${value%.*}" ;;
+    *) printf "%s" "$value" ;;
+  esac
+}
+
+read_firewall_source() {
+  local prompt="$1"
+  local default="$2"
+  local value
+
+  while true; do
+    value="$(read_default "$prompt" "$default")"
+    if valid_firewall_source "$value"; then
+      normalize_firewall_source "$value"
+      return
+    fi
+    warn "Use * for anywhere, an IPv4 like 192.168.1.10, a CIDR like 192.168.1.0/24, or a LAN wildcard like 192.168.1.*."
+  done
+}
+
+valid_firewall_protocol() {
+  case "$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')" in
+    tcp|udp|both) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ufw_allow_port_rule() {
+  local port="$1"
+  local protocol="$2"
+  local source="$3"
+
+  protocol="$(printf "%s" "$protocol" | tr '[:upper:]' '[:lower:]')"
+  if [ "$protocol" = "both" ]; then
+    ufw_allow_port_rule "$port" "tcp" "$source"
+    ufw_allow_port_rule "$port" "udp" "$source"
+    return
+  fi
+
+  if [ "$source" = "any" ]; then
+    sudo_cmd ufw allow "$port/$protocol"
+  else
+    sudo_cmd ufw allow from "$source" to any port "$port" proto "$protocol"
+  fi
+}
+
+ufw_allow_icmp() {
+  local source="$1"
+  local source_arg=""
+  local rule
+  local tmp
+  local before_rules="/etc/ufw/before.rules"
+
+  if [ "$source" != "any" ]; then
+    source_arg="-s $source "
+  fi
+
+  rule="-A ufw-before-input ${source_arg}-p icmp --icmp-type echo-request -j ACCEPT"
+
+  if [ ! -f "$before_rules" ]; then
+    warn "UFW before.rules was not found. Install/configure ufw first."
+    return 1
+  fi
+
+  if sudo_cmd grep -Fq "$rule" "$before_rules"; then
+    ok "ICMP rule already exists."
+    return
+  fi
+
+  tmp="$(mktemp)"
+  awk -v rule="$rule" '
+    BEGIN { added = 0 }
+    /^COMMIT$/ && !added {
+      print rule
+      added = 1
+    }
+    { print }
+    END {
+      if (!added) print rule
+    }
+  ' "$before_rules" > "$tmp"
+
+  sudo_cmd cp "$before_rules" "${before_rules}.shell-alias-tools.bak"
+  sudo_cmd cp "$tmp" "$before_rules"
+  rm -f "$tmp"
+  ok "ICMP echo-request rule added to UFW before.rules."
+}
+
+configure_ufw_firewall() {
+  local ssh_port="22"
+  local ssh_source
+  local rule_type
+  local port
+  local protocol
+  local source
+
+  if ! command -v ufw >/dev/null 2>&1; then
+    warn "UFW is not installed, skipping firewall configuration."
+    return
+  fi
+
+  if ! prompt_yes_no "Configure UFW firewall now?" "yes"; then
+    return
+  fi
+
+  info "UFW defaults: deny incoming, allow outgoing."
+  sudo_cmd ufw default deny incoming
+  sudo_cmd ufw default allow outgoing
+
+  if prompt_yes_no "Allow inbound SSH before enabling the firewall?" "yes"; then
+    ssh_port="$(read_validated "SSH inbound port" "22" valid_port "Use a port number from 1 to 65535.")"
+    ssh_source="$(read_firewall_source "SSH source (*, IPv4, CIDR, or 192.168.1.*)" "*")"
+    ufw_allow_port_rule "$ssh_port" "tcp" "$ssh_source"
+    CONFIGURED_SSH_PORT="$ssh_port"
+  fi
+
+  while prompt_yes_no "Add another firewall rule?" "no"; do
+    rule_type="$(read_default "Rule type: port or icmp" "port")"
+    rule_type="$(printf "%s" "$rule_type" | tr '[:upper:]' '[:lower:]')"
+
+    case "$rule_type" in
+      port)
+        port="$(read_validated "Inbound port" "80" valid_port "Use a port number from 1 to 65535.")"
+        protocol="$(read_validated "Protocol (tcp, udp, or both)" "tcp" valid_firewall_protocol "Use tcp, udp, or both.")"
+        source="$(read_firewall_source "Source (*, IPv4, CIDR, or 192.168.1.*)" "*")"
+        ufw_allow_port_rule "$port" "$protocol" "$source"
+        ;;
+      icmp|ping)
+        source="$(read_firewall_source "ICMP source (*, IPv4, CIDR, or 192.168.1.*)" "*")"
+        ufw_allow_icmp "$source" || true
+        ;;
+      *)
+        warn "Use port for TCP/UDP services or icmp for ping."
+        ;;
+    esac
+  done
+
+  if prompt_yes_no "Enable UFW now?" "yes"; then
+    sudo_cmd ufw --force enable
+  fi
+
+  sudo_cmd ufw status verbose || true
+}
+
+configure_fail2ban() {
+  local jail_file="/etc/fail2ban/jail.d/shell-alias-tools-sshd.conf"
+  local tmp
+  local ssh_port="${CONFIGURED_SSH_PORT:-22}"
+  local maxretry
+  local findtime
+  local bantime
+
+  if ! command -v fail2ban-client >/dev/null 2>&1 && ! command -v fail2ban-server >/dev/null 2>&1; then
+    warn "fail2ban is not installed, skipping fail2ban configuration."
+    return
+  fi
+
+  if ! prompt_yes_no "Configure fail2ban protection for SSH?" "yes"; then
+    return
+  fi
+
+  ssh_port="$(read_validated "SSH port for fail2ban jail" "$ssh_port" valid_port "Use a port number from 1 to 65535.")"
+  maxretry="$(read_validated "Max SSH retries before ban" "5" valid_positive_int "Use a positive number.")"
+  findtime="$(read_validated "Find time window (examples: 10m, 1h)" "10m" valid_fail2ban_duration "Use a value like 10m, 1h, or 3600.")"
+  bantime="$(read_validated "Ban time (examples: 1h, 24h)" "1h" valid_fail2ban_duration "Use a value like 1h, 24h, or 3600.")"
+
+  tmp="$(mktemp)"
+  {
+    printf "[sshd]\n"
+    printf "enabled = true\n"
+    printf "port = %s\n" "$ssh_port"
+    printf "filter = sshd\n"
+    printf "backend = auto\n"
+    printf "maxretry = %s\n" "$maxretry"
+    printf "findtime = %s\n" "$findtime"
+    printf "bantime = %s\n" "$bantime"
+  } > "$tmp"
+
+  sudo_cmd mkdir -p "$(dirname "$jail_file")"
+  if [ -f "$jail_file" ]; then
+    sudo_cmd cp "$jail_file" "${jail_file}.bak"
+  fi
+  sudo_cmd cp "$tmp" "$jail_file"
+  rm -f "$tmp"
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo_cmd systemctl enable --now fail2ban 2>/dev/null || sudo_cmd systemctl restart fail2ban 2>/dev/null || true
+  else
+    sudo_cmd service fail2ban restart 2>/dev/null || true
+  fi
+
+  sudo_cmd fail2ban-client status sshd 2>/dev/null || warn "fail2ban config was written, but the sshd jail is not reporting status yet."
+}
+
+pam_add_google_authenticator() {
+  local service="$1"
+  local module_line="$2"
+  local pam_file="/etc/pam.d/$service"
+  local tmp
+
+  if [ ! -f "$pam_file" ]; then
+    warn "PAM file not found: $pam_file"
+    return 1
+  fi
+
+  if sudo_cmd grep -Eq 'pam_google_authenticator\.so' "$pam_file"; then
+    ok "PAM already references google-authenticator for $service."
+    return
+  fi
+
+  tmp="$(mktemp)"
+  {
+    printf "%s\n" "$module_line"
+    cat "$pam_file"
+  } > "$tmp"
+
+  sudo_cmd cp "$pam_file" "${pam_file}.shell-alias-tools.bak"
+  sudo_cmd cp "$tmp" "$pam_file"
+  rm -f "$tmp"
+  ok "PAM MFA enabled for $service."
+}
+
+sshd_set_option() {
+  local key="$1"
+  local value="$2"
+  local file="/etc/ssh/sshd_config"
+  local tmp
+
+  if [ ! -f "$file" ]; then
+    warn "sshd_config was not found. Install/enable the SSH server first."
+    return 1
+  fi
+
+  tmp="$(mktemp)"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { lkey = tolower(key); done = 0 }
+    {
+      line = $0
+      sub(/^[#[:space:]]*/, "", line)
+      split(line, parts, /[[:space:]]+/)
+      if (tolower(parts[1]) == lkey) {
+        if (!done) {
+          print key " " value
+          done = 1
+        }
+        next
+      }
+      print
+    }
+    END {
+      if (!done) print key " " value
+    }
+  ' "$file" > "$tmp"
+
+  sudo_cmd cp "$file" "${file}.shell-alias-tools.bak"
+  sudo_cmd cp "$tmp" "$file"
+  rm -f "$tmp"
+}
+
+reload_ssh_service() {
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo_cmd systemctl reload ssh 2>/dev/null || sudo_cmd systemctl reload sshd 2>/dev/null || true
+  else
+    sudo_cmd service ssh reload 2>/dev/null || sudo_cmd service sshd reload 2>/dev/null || true
+  fi
+}
+
+configure_linux_mfa() {
+  local manager
+  local target
+  local module_line="auth required pam_google_authenticator.so nullok"
+
+  if ! prompt_yes_no "Configure TOTP MFA with PAM for SSH/local login?" "no"; then
+    return
+  fi
+
+  manager="$(detect_linux_package_manager)"
+  if ! command -v google-authenticator >/dev/null 2>&1; then
+    if [ -n "$manager" ]; then
+      install_linux_dependency "google-authenticator" "$manager" || true
+    fi
+  fi
+
+  if ! command -v google-authenticator >/dev/null 2>&1; then
+    warn "google-authenticator is not available on this system. Skipping MFA setup."
+    return
+  fi
+
+  while true; do
+    target="$(read_default "MFA target: ssh, local, both, or none" "ssh")"
+    target="$(printf "%s" "$target" | tr '[:upper:]' '[:lower:]')"
+    case "$target" in
+      ssh|local|both|none) break ;;
+      *) warn "Use ssh, local, both, or none." ;;
+    esac
+  done
+
+  [ "$target" = "none" ] && return
+
+  if prompt_yes_no "Require MFA immediately for every user? (no keeps nullok until users enroll)" "no"; then
+    module_line="auth required pam_google_authenticator.so"
+  fi
+
+  if prompt_yes_no "Run google-authenticator now for user $(id -un)?" "yes"; then
+    if [ -e /dev/tty ]; then
+      google-authenticator < /dev/tty
+    else
+      google-authenticator
+    fi
+  fi
+
+  case "$target" in
+    ssh|both)
+      pam_add_google_authenticator "sshd" "$module_line" || true
+      sshd_set_option "UsePAM" "yes" || true
+      sshd_set_option "KbdInteractiveAuthentication" "yes" || true
+      sshd_set_option "ChallengeResponseAuthentication" "yes" || true
+      reload_ssh_service
+      ;;
+  esac
+
+  case "$target" in
+    local|both)
+      pam_add_google_authenticator "login" "$module_line" || true
+      ;;
+  esac
+
+  ok "TOTP MFA configuration step complete."
+}
+
+configure_linux_security() {
+  local os="$1"
+
+  [ "$os" = "linux" ] || return
+
+  info "Linux security setup"
+  configure_ufw_firewall
+  configure_fail2ban
+  configure_linux_mfa
 }
 
 ensure_ssh_key() {
@@ -822,6 +1318,7 @@ main() {
   local os
   local profile
   local profile_list
+  local mode="basic"
 
   os="$(detect_os)"
   info "Installing Shell Alias Tools for $os..."
@@ -834,8 +1331,10 @@ main() {
   done
 
   if [ "$SKIP_DEPS" -eq 0 ]; then
-    install_dependencies "$os"
+    mode="$(choose_install_mode)"
+    install_dependencies "$os" "$mode"
     configure_local_ssh_server "$os"
+    configure_linux_security "$os"
   fi
 
   if [ "$SKIP_INFRA" -eq 0 ]; then

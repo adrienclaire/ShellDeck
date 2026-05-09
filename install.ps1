@@ -3,6 +3,7 @@ param(
     [switch]$Yes,
     [switch]$SkipDeps,
     [switch]$SkipInfra,
+    [string]$Mode = "",
     [string]$InstallDir = $(if ($env:SHELL_ALIAS_TOOLS_HOME) { $env:SHELL_ALIAS_TOOLS_HOME } else { Join-Path $HOME ".shell-alias-tools" })
 )
 
@@ -58,6 +59,50 @@ function Confirm-InstallChoice {
             "non" { return $false }
             default { Write-Warn "Please answer yes or no." }
         }
+    }
+}
+
+function Normalize-InstallMode {
+    param([string]$Value)
+
+    switch ($Value.Trim().ToLowerInvariant()) {
+        { $_ -in @("1", "b", "basic") } { return "basic" }
+        { $_ -in @("2", "c", "complete", "complet", "full") } { return "complete" }
+        { $_ -in @("3", "m", "manual") } { return "manual" }
+        default { return "" }
+    }
+}
+
+function Read-InstallMode {
+    if (-not [string]::IsNullOrWhiteSpace($Mode)) {
+        $normalized = Normalize-InstallMode $Mode
+        if ($normalized) {
+            return $normalized
+        }
+        Write-Warn "Unknown install mode '$Mode'. Use basic, complete, or manual."
+    }
+
+    if ($Yes) {
+        return "basic"
+    }
+
+    Write-Step "Setup mode"
+    Write-Host "  1) Basic    - install required smart-shell dependencies automatically"
+    Write-Host "  2) Complete - install required dependencies plus Docker, Multipass, and GitHub CLI"
+    Write-Host "  3) Manual   - ask before installing every dependency"
+
+    while ($true) {
+        $choice = Read-Host "Choose setup mode [1]"
+        if ([string]::IsNullOrWhiteSpace($choice)) {
+            $choice = "1"
+        }
+
+        $normalized = Normalize-InstallMode $choice
+        if ($normalized) {
+            return $normalized
+        }
+
+        Write-Warn "Choose 1 for Basic, 2 for Complete, or 3 for Manual."
     }
 }
 
@@ -180,7 +225,10 @@ function Add-ProfileHook {
 }
 
 function Install-WindowsDependency {
-    param([string]$Tool)
+    param(
+        [string]$Tool,
+        [bool]$Auto = $false
+    )
 
     $wingetPackages = @{
         git       = "Git.Git"
@@ -203,7 +251,7 @@ function Install-WindowsDependency {
     }
 
     if ($Tool -eq "ssh") {
-        if (Confirm-InstallChoice "Install the Windows OpenSSH Client capability?" $true) {
+        if ($Auto -or (Confirm-InstallChoice "Install the Windows OpenSSH Client capability?" $true)) {
             try {
                 Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0 | Out-Null
             }
@@ -243,6 +291,8 @@ function Install-WindowsDependency {
 }
 
 function Install-Dependencies {
+    param([string]$SetupMode)
+
     $requiredTools = @(
         "git", "ssh", "curl", "wget", "fzf", "bash-completion", "bat", "eza", "zoxide",
         "starship", "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
@@ -251,29 +301,58 @@ function Install-Dependencies {
     $optionalTools = @("gh", "docker", "multipass")
 
     Write-Step "Dependency setup"
-    Write-Step "On a new VM, answer yes to the smart-shell dependencies for the full cockpit experience."
+    switch ($SetupMode) {
+        "basic" { Write-Step "Basic mode: installing required smart-shell dependencies automatically." }
+        "complete" { Write-Step "Complete mode: installing required dependencies plus Docker, Multipass, and GitHub CLI." }
+        "manual" { Write-Step "Manual mode: you will be asked about every dependency." }
+    }
 
     foreach ($tool in $requiredTools) {
         $path = Get-InstallToolPath $tool
         $status = if ($path) { "installed at $path" } else { "missing" }
-        $default = -not [bool]$path
 
-        if (-not (Confirm-InstallChoice "Install/update smart-shell dependency '$tool'? ($status)" $default)) {
-            Write-Warn "$tool is useful for the best Shell Alias Tools experience. Some commands may fall back or fail."
+        if ($SetupMode -eq "manual") {
+            $default = -not [bool]$path
+            if (-not (Confirm-InstallChoice "Install/update smart-shell dependency '$tool'? ($status)" $default)) {
+                Write-Warn "$tool is useful for the best Shell Alias Tools experience. Some commands may fall back or fail."
+                continue
+            }
+        }
+        elseif ($path) {
+            Write-Ok "$tool already installed ($path)"
             continue
         }
+        else {
+            Write-Step "Installing required dependency: $tool"
+        }
 
-        Install-WindowsDependency $tool
+        Install-WindowsDependency -Tool $tool -Auto ($SetupMode -ne "manual")
+    }
+
+    if ($SetupMode -eq "basic") {
+        Write-Step "Basic mode skips optional dependencies: $($optionalTools -join ', ')"
+        return
     }
 
     foreach ($tool in $optionalTools) {
         $path = Get-InstallToolPath $tool
         $status = if ($path) { "installed at $path" } else { "missing" }
-        $default = ($tool -eq "gh" -and -not [bool]$path)
 
-        if (Confirm-InstallChoice "Install/update optional dependency '$tool'? ($status)" $default) {
-            Install-WindowsDependency $tool
+        if ($SetupMode -eq "manual") {
+            $default = ($tool -eq "gh" -and -not [bool]$path)
+            if (-not (Confirm-InstallChoice "Install/update optional dependency '$tool'? ($status)" $default)) {
+                continue
+            }
         }
+        elseif ($path) {
+            Write-Ok "$tool already installed ($path)"
+            continue
+        }
+        else {
+            Write-Step "Installing optional dependency: $tool"
+        }
+
+        Install-WindowsDependency -Tool $tool -Auto ($SetupMode -ne "manual")
     }
 }
 
@@ -318,7 +397,8 @@ function Main {
     Add-ProfileHook -RuntimePath $runtimePath
 
     if (-not $SkipDeps) {
-        Install-Dependencies
+        $setupMode = Read-InstallMode
+        Install-Dependencies -SetupMode $setupMode
         Enable-LocalSshServer
     }
 

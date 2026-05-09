@@ -38,7 +38,8 @@ bash install-macos.sh
 - Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, and infra host count.
 - Turns Bash into a smarter daily shell with clean shared history, Bash completion, fzf key bindings, a Starship prompt, modern file listing, pretty file reading, smart directory jumping, fuzzy file picking, archive extraction, port inspection, and safe fallbacks.
 - Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `wget`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `starship`, `ripgrep`, `fd`, `jq`, `yq`, `nc`, `tree`, `unzip`, `zip`, `rsync`, `tmux`, `btop`, `htop`, `duf`, `neovim`, `gh`, `docker`, and `multipass` where supported.
-- Shows a dependency checklist every install and asks directly before installing each tool.
+- On Linux, adds VM hardening helpers: `ufw` and `fail2ban`, with optional guided configuration.
+- Lets you choose Basic, Complete, or Manual dependency setup at install time.
 - Asks whether to enable inbound SSH on the new VM or machine.
 - Asks whether to generate an ed25519 SSH key.
 - Shows the public key and tells you how to copy it to the remote host.
@@ -110,6 +111,9 @@ Windows:
 
 ```powershell
 .\install.ps1 -Yes
+.\install.ps1 -Mode basic
+.\install.ps1 -Mode complete
+.\install.ps1 -Mode manual
 .\install.ps1 -SkipDeps
 .\install.ps1 -SkipInfra
 ```
@@ -118,11 +122,35 @@ Linux/macOS:
 
 ```bash
 bash install.sh --yes
+bash install.sh --mode basic
+bash install.sh --mode complete
+bash install.sh --mode manual
 bash install.sh --skip-deps
 bash install.sh --skip-infra
 ```
 
+Setup modes:
+
+```text
+Basic    Install required smart-shell dependencies automatically.
+Complete Install required dependencies plus GitHub CLI, Docker, and Multipass.
+Manual   Ask before installing each dependency.
+```
+
 On apt-based Linux systems, the installer runs `apt-get update`, counts available upgrades, and asks before running `apt-get upgrade -y`.
+
+## Linux Security Setup
+
+After dependency setup on Linux, the installer can guide:
+
+- UFW firewall defaults: deny incoming, allow outgoing.
+- SSH inbound allow rule, with port `22` as the default or your custom SSH port.
+- Extra inbound rules by port, protocol (`tcp`, `udp`, or `both`), and source (`*`, IPv4, CIDR, or `192.168.1.*`).
+- ICMP echo-request rules for ping, including source-limited LAN rules.
+- fail2ban SSH jail settings: port, retry count, find window, and ban time.
+- Optional TOTP MFA through PAM for SSH, local console login, or both.
+
+MFA setup uses `google-authenticator` where available. It keeps `nullok` by default during rollout so an unenrolled user is not locked out unless you explicitly choose to require MFA immediately. Passkey/PAM U2F setup is not automated yet because it needs per-user hardware key enrollment and mapping.
 
 ## Infra Config
 
@@ -157,7 +185,7 @@ When adding a service to a host, enter the protocol and the port. For host `192.
 
 Yes, `fzf` works on macOS. The installer treats it as a required dependency for the best experience and can install it with Homebrew. Shell Alias Tools uses `fzf` directly for `sshhosts` and `infra-edit`.
 
-Docker and Multipass are heavier desktop tools on macOS, so the installer asks before installing each one.
+Docker and Multipass are heavier desktop tools on macOS. Complete mode installs them; Manual mode asks before each one; Basic mode skips them.
 
 ## Files
 

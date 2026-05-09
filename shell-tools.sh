@@ -102,6 +102,9 @@ _shell_tools_dependency_path() {
     neovim)
       command -v nvim 2>/dev/null
       ;;
+    fail2ban)
+      command -v fail2ban-client 2>/dev/null || command -v fail2ban-server 2>/dev/null
+      ;;
     *)
       command -v "$tool" 2>/dev/null
       ;;
@@ -136,6 +139,9 @@ _shell_tools_sort_human() {
 
 _shell_tools_smart_tool_list() {
   printf "%s\n" git ssh curl wget fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim gh docker multipass
+  case "$(uname -s 2>/dev/null)" in
+    Linux) printf "%s\n" ufw fail2ban ;;
+  esac
 }
 
 _shell_tools_bat_command() {
