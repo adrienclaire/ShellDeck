@@ -11,6 +11,34 @@ else {
 $script:AliasToolsPath = Join-Path $script:ShellToolsRoot "aliases.ps1"
 $script:InfraHostsPath = Join-Path $script:ShellToolsRoot "infra-hosts.csv"
 
+function Convert-ShellToolsInfraSchema {
+    if (-not (Test-Path $script:InfraHostsPath)) {
+        return
+    }
+
+    $header = Get-Content -Path $script:InfraHostsPath -First 1 -ErrorAction SilentlyContinue
+    $normalizedHeader = ($header -replace '"', "")
+    if ($normalizedHeader -ne "Name,HostName,User,Port,Role,CheckPorts,Url,SshEnabled") {
+        return
+    }
+
+    $records = @(Import-Csv -Path $script:InfraHostsPath | ForEach-Object {
+        $services = if ($_.Url) { $_.Url } else { "" }
+        [PSCustomObject]@{
+            Name        = $_.Name
+            HostName    = $_.HostName
+            SshEnabled  = $_.SshEnabled
+            User        = $_.User
+            Port        = $_.Port
+            InSshConfig = $_.SshEnabled
+            Docker      = if ($_.Role -match "docker") { "true" } else { "false" }
+            Services    = $services
+        }
+    })
+
+    $records | Export-Csv -Path $script:InfraHostsPath -NoTypeInformation -Encoding UTF8
+}
+
 function Ensure-ShellToolsHome {
     if (-not (Test-Path $script:ShellToolsRoot)) {
         New-Item -ItemType Directory -Force -Path $script:ShellToolsRoot | Out-Null
@@ -21,24 +49,17 @@ function Ensure-ShellToolsHome {
     }
 
     if (-not (Test-Path $script:InfraHostsPath)) {
-        "Name,HostName,User,Port,Role,CheckPorts,Url,SshEnabled" |
+        "Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services" |
             Set-Content -Path $script:InfraHostsPath -Encoding UTF8
     }
+
+    Convert-ShellToolsInfraSchema
 }
 
 Ensure-ShellToolsHome
 
 if (Test-Path $script:AliasToolsPath) {
     . $script:AliasToolsPath
-}
-
-function Write-ShellToolsLine {
-    param(
-        [string]$Text = "",
-        [string]$Color = "White"
-    )
-
-    Write-Host $Text -ForegroundColor $Color
 }
 
 function Read-ShellToolsDefault {
@@ -125,22 +146,6 @@ function Test-ShellToolsUser {
     return ($Value -match '^[A-Za-z0-9._-]+[$]?$')
 }
 
-function Test-ShellToolsRole {
-    param([string]$Value)
-    return (-not [string]::IsNullOrWhiteSpace($Value) -and $Value -notmatch '[,\r\n]')
-}
-
-function Test-ShellToolsUrl {
-    param([string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $true
-    }
-
-    $uri = $null
-    return [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri) -and $uri.Scheme -in @("http", "https")
-}
-
 function Test-ShellToolsPortValue {
     param([string]$Value)
 
@@ -152,28 +157,9 @@ function Test-ShellToolsPortValue {
     return ($port -ge 1 -and $port -le 65535)
 }
 
-function Convert-ShellToolsPortList {
+function Test-ShellToolsProtocol {
     param([string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $null
-    }
-
-    $ports = @()
-    $items = $Value.Trim() -split '[;,\s]+' | Where-Object { $_ }
-    foreach ($item in $items) {
-        if (-not (Test-ShellToolsPortValue $item)) {
-            return $null
-        }
-
-        $ports += ([int]$item).ToString()
-    }
-
-    if ($ports.Count -eq 0) {
-        return $null
-    }
-
-    return (($ports | Select-Object -Unique) -join ";")
+    return ($Value.ToLowerInvariant() -in @("http", "https"))
 }
 
 function Read-ShellToolsValidatedDefault {
@@ -235,66 +221,54 @@ function Resolve-ShellToolsPortValue {
     return [int]$portText
 }
 
-function Resolve-ShellToolsPortList {
+function Read-ShellToolsServices {
     param(
-        [string]$Value,
-        [string]$Prompt,
-        [string]$Default
+        [Parameter(Mandatory = $true)]
+        [string]$HostName,
+
+        [string]$Existing = ""
     )
 
-    if (-not [string]::IsNullOrWhiteSpace($Value)) {
-        $normalized = Convert-ShellToolsPortList $Value
-        if ($normalized) {
-            return $normalized
+    $services = New-Object System.Collections.Generic.List[string]
+
+    if ($Existing) {
+        Write-Host ""
+        Write-Host "Existing service endpoints:" -ForegroundColor Cyan
+        $Existing -split ";" | Where-Object { $_ } | ForEach-Object {
+            Write-Host "  - $_"
         }
 
-        Write-Host "'$Value' is not a valid port list. Use values like 22;8006 or 22, 8006." -ForegroundColor Yellow
+        if (Read-ShellToolsYesNo "Keep these service endpoints?" $true) {
+            return $Existing
+        }
+    }
+
+    if (-not (Read-ShellToolsYesNo "Do you want to add a service endpoint?" $true)) {
+        return ""
     }
 
     while ($true) {
-        $answer = Read-ShellToolsDefault $Prompt $Default
-        $normalized = Convert-ShellToolsPortList $answer
-        if ($normalized) {
-            return $normalized
-        }
+        $protocol = Read-ShellToolsValidatedDefault -Prompt "Service protocol, http or https" -Default "http" -Validator ${function:Test-ShellToolsProtocol} -ErrorMessage "Use http or https."
+        $port = Read-ShellToolsValidatedDefault -Prompt "Service port, example 8000, 80, 8222" -Default "" -Validator ${function:Test-ShellToolsPortValue} -ErrorMessage "This is not a valid service port. Use a number from 1 to 65535."
+        $services.Add(("{0}://{1}:{2}" -f $protocol.ToLowerInvariant(), $HostName, $port))
 
-        Write-Host "This is not a valid port list. Use values like 22;8006 or 22, 8006." -ForegroundColor Yellow
+        if (-not (Read-ShellToolsYesNo "Add another service endpoint?" $false)) {
+            break
+        }
     }
+
+    return ($services -join ";")
 }
 
 function Get-PrimaryIPv4 {
     try {
-        if (Get-Command Get-NetIPConfiguration -ErrorAction SilentlyContinue) {
-            $ip = Get-NetIPConfiguration |
-                Where-Object { $_.IPv4DefaultGateway -ne $null -and $_.IPv4Address.IPAddress -notlike "169.254.*" } |
-                Select-Object -First 1 |
-                ForEach-Object { $_.IPv4Address.IPAddress }
+        $ip = Get-NetIPConfiguration |
+            Where-Object { $_.IPv4DefaultGateway -ne $null -and $_.IPv4Address.IPAddress -notlike "169.254.*" } |
+            Select-Object -First 1 |
+            ForEach-Object { $_.IPv4Address.IPAddress }
 
-            if ($ip) {
-                return $ip
-            }
-        }
-    }
-    catch {
-        # Fall through to the .NET network adapter fallback.
-    }
-
-    try {
-        $interfaces = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
-            Where-Object {
-                $_.OperationalStatus -eq [System.Net.NetworkInformation.OperationalStatus]::Up -and
-                $_.NetworkInterfaceType -ne [System.Net.NetworkInformation.NetworkInterfaceType]::Loopback
-            }
-
-        foreach ($interface in $interfaces) {
-            foreach ($address in $interface.GetIPProperties().UnicastAddresses) {
-                if ($address.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
-                    $candidate = $address.Address.IPAddressToString
-                    if ($candidate -and $candidate -notlike "169.254.*") {
-                        return $candidate
-                    }
-                }
-            }
+        if ($ip) {
+            return $ip
         }
     }
     catch {
@@ -322,7 +296,8 @@ function Get-ShortUptime {
 
 function Get-ShellToolsDiskSummary {
     try {
-        $drive = Get-PSDrive -Name (Split-Path $HOME -Qualifier).TrimEnd(":") -ErrorAction Stop
+        $driveName = (Split-Path $HOME -Qualifier).TrimEnd(":")
+        $drive = Get-PSDrive -Name $driveName -ErrorAction Stop
         $freeGb = [math]::Round($drive.Free / 1GB, 1)
         $totalGb = [math]::Round(($drive.Free + $drive.Used) / 1GB, 1)
         return ("{0} GB free / {1} GB" -f $freeGb, $totalGb)
@@ -332,6 +307,71 @@ function Get-ShellToolsDiskSummary {
     }
 }
 
+function Get-ShellToolsToolPath {
+    param([string]$Tool)
+
+    switch ($Tool) {
+        "bash-completion" { return "PowerShell completion" }
+        "bat" {
+            $cmd = Get-Command bat -ErrorAction SilentlyContinue
+            if (-not $cmd) { $cmd = Get-Command batcat -ErrorAction SilentlyContinue }
+            if ($cmd) { return $cmd.Source }
+            return ""
+        }
+        "fd" {
+            $cmd = Get-Command fd -ErrorAction SilentlyContinue
+            if (-not $cmd) { $cmd = Get-Command fdfind -ErrorAction SilentlyContinue }
+            if ($cmd) { return $cmd.Source }
+            return ""
+        }
+        "ripgrep" {
+            $cmd = Get-Command rg -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Source }
+            return ""
+        }
+        "neovim" {
+            $cmd = Get-Command nvim -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Source }
+            return ""
+        }
+        "nc" {
+            $cmd = Get-Command nc -ErrorAction SilentlyContinue
+            if (-not $cmd) { $cmd = Get-Command ncat -ErrorAction SilentlyContinue }
+            if ($cmd) { return $cmd.Source }
+            return ""
+        }
+        "tree" {
+            $cmd = Get-Command tree.com -ErrorAction SilentlyContinue
+            if (-not $cmd) { $cmd = Get-Command tree -ErrorAction SilentlyContinue }
+            if ($cmd) { return $cmd.Source }
+            return ""
+        }
+        "unzip" {
+            $cmd = Get-Command Expand-Archive -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Name }
+            return ""
+        }
+        "zip" {
+            $cmd = Get-Command Compress-Archive -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Name }
+            return ""
+        }
+        default {
+            $cmd = Get-Command $Tool -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Source }
+            return ""
+        }
+    }
+}
+
+function Get-ShellToolsSmartToolList {
+    return @(
+        "git", "ssh", "curl", "wget", "fzf", "bash-completion", "bat", "eza", "zoxide",
+        "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
+        "btop", "htop", "duf", "neovim", "gh", "docker", "multipass"
+    )
+}
+
 function Get-InfraHosts {
     Ensure-ShellToolsHome
 
@@ -339,8 +379,7 @@ function Get-InfraHosts {
         return @()
     }
 
-    $hosts = @(Import-Csv -Path $script:InfraHostsPath)
-    return $hosts | Where-Object { $_.Name -and $_.HostName }
+    return @(Import-Csv -Path $script:InfraHostsPath | Where-Object { $_.Name -and $_.HostName })
 }
 
 function Add-InfraHostRecord {
@@ -351,18 +390,17 @@ function Add-InfraHostRecord {
         [Parameter(Mandatory = $true)]
         [string]$HostName,
 
-        [Parameter(Mandatory = $true)]
-        [string]$User,
+        [bool]$SshEnabled = $false,
+
+        [string]$User = "",
 
         [int]$Port = 22,
 
-        [string]$Role = "server",
+        [bool]$InSshConfig = $false,
 
-        [string]$CheckPorts = "22",
+        [bool]$Docker = $false,
 
-        [string]$Url = "",
-
-        [bool]$SshEnabled = $true,
+        [string]$Services = "",
 
         [string]$PreviousName = ""
     )
@@ -371,14 +409,14 @@ function Add-InfraHostRecord {
 
     $records = @(Get-InfraHosts | Where-Object { $_.Name -ne $Name -and $_.Name -ne $PreviousName })
     $records += [PSCustomObject]@{
-        Name       = $Name
-        HostName   = $HostName
-        User       = $User
-        Port       = $Port
-        Role       = $Role
-        CheckPorts = $CheckPorts
-        Url        = $Url
-        SshEnabled = $SshEnabled.ToString().ToLowerInvariant()
+        Name        = $Name
+        HostName    = $HostName
+        SshEnabled  = $SshEnabled.ToString().ToLowerInvariant()
+        User        = $User
+        Port        = if ($SshEnabled) { $Port } else { "" }
+        InSshConfig = $InSshConfig.ToString().ToLowerInvariant()
+        Docker      = $Docker.ToString().ToLowerInvariant()
+        Services    = $Services
     }
 
     $records | Sort-Object Name | Export-Csv -Path $script:InfraHostsPath -NoTypeInformation -Encoding UTF8
@@ -410,50 +448,33 @@ function Ensure-SshKey {
     }
 }
 
-function Add-SshConfigHost {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
+function Remove-SshConfigHost {
+    param([string]$Name)
 
-        [Parameter(Mandatory = $true)]
-        [string]$HostName,
-
-        [Parameter(Mandatory = $true)]
-        [string]$User,
-
-        [int]$Port = 22
-    )
-
-    $sshDir = Join-Path $HOME ".ssh"
-    $configPath = Join-Path $sshDir "config"
-
-    if (-not (Test-Path $sshDir)) {
-        New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
-    }
-
+    $configPath = Join-Path $HOME ".ssh\config"
     if (-not (Test-Path $configPath)) {
-        New-Item -ItemType File -Force -Path $configPath | Out-Null
-    }
-
-    $escaped = [regex]::Escape($Name)
-    $exists = Select-String -Path $configPath -Pattern "^\s*Host\s+$escaped\s*$" -Quiet -ErrorAction SilentlyContinue
-    if ($exists) {
-        Write-Host "SSH config already has Host $Name. Keeping it." -ForegroundColor Yellow
         return
     }
 
-    $entry = @"
+    $lines = @(Get-Content $configPath -ErrorAction SilentlyContinue)
+    $kept = New-Object System.Collections.Generic.List[string]
+    $skip = $false
 
-Host $Name
-    HostName $HostName
-    User $User
-    Port $Port
-    ServerAliveInterval 30
-    ServerAliveCountMax 3
-"@
+    foreach ($line in $lines) {
+        if ($line -match '^\s*Host\s+(.+)$') {
+            $hostNames = $matches[1] -split '\s+'
+            $skip = [bool]($hostNames | Where-Object { $_ -eq $Name })
+            if ($skip) {
+                continue
+            }
+        }
 
-    Add-Content -Path $configPath -Value $entry
-    Write-Host "SSH host added: ssh $Name" -ForegroundColor Green
+        if (-not $skip) {
+            $kept.Add($line)
+        }
+    }
+
+    Set-Content -Path $configPath -Value $kept -Encoding UTF8
 }
 
 function Set-SshConfigHost {
@@ -483,31 +504,10 @@ function Set-SshConfigHost {
         New-Item -ItemType File -Force -Path $configPath | Out-Null
     }
 
-    $lines = @(Get-Content $configPath -ErrorAction SilentlyContinue)
-    $kept = New-Object System.Collections.Generic.List[string]
-    $skip = $false
-    $namesToRemove = @($Name)
     if ($PreviousName) {
-        $namesToRemove += $PreviousName
+        Remove-SshConfigHost $PreviousName
     }
-
-    foreach ($line in $lines) {
-        if ($line -match '^\s*Host\s+(.+)$') {
-            $hostNames = $matches[1] -split '\s+'
-            if ($hostNames | Where-Object { $_ -in $namesToRemove }) {
-                $skip = $true
-                continue
-            }
-
-            $skip = $false
-        }
-
-        if (-not $skip) {
-            $kept.Add($line)
-        }
-    }
-
-    Set-Content -Path $configPath -Value $kept -Encoding UTF8
+    Remove-SshConfigHost $Name
 
     $entry = @"
 
@@ -526,41 +526,46 @@ Host $Name
 function Add-InfraHost {
     param(
         [string]$Name,
-        [string]$HostName,
-        [string]$User,
-        [int]$Port = 0,
-        [string]$Role = "",
-        [string]$CheckPorts = "",
-        [string]$Url = ""
+        [string]$HostName
     )
 
     Write-Host ""
     Write-Host "Infra host onboarding" -ForegroundColor Cyan
 
-    $Name = Resolve-ShellToolsValidatedValue -Value $Name -Prompt "Host alias" -Default "proxmox" -Validator ${function:Test-ShellToolsInfraName} -ErrorMessage "Use a host alias like proxmox, docker-vm, or app01. Letters, numbers, dot, dash, underscore; start with a letter."
-    $HostName = Resolve-ShellToolsValidatedValue -Value $HostName -Prompt "Host IPv4" -Default "192.168.1.185" -Validator ${function:Test-ShellToolsIPv4} -ErrorMessage "This is not an IPv4 address. Example: 192.168.1.185."
-    $User = Resolve-ShellToolsValidatedValue -Value $User -Prompt "SSH user" -Default "root" -Validator ${function:Test-ShellToolsUser} -ErrorMessage "Use a simple SSH user, like root, ubuntu, admin, or adrien."
-    $Port = Resolve-ShellToolsPortValue -Value $Port -Prompt "SSH port" -Default 22
-    $Role = Resolve-ShellToolsValidatedValue -Value $Role -Prompt "Role" -Default "proxmox" -Validator ${function:Test-ShellToolsRole} -ErrorMessage "Role cannot be empty and cannot contain commas."
+    $Name = Resolve-ShellToolsValidatedValue -Value $Name -Prompt "Host alias" -Default "server1" -Validator ${function:Test-ShellToolsInfraName} -ErrorMessage "Use a host alias like server1, docker-vm, or app01. Letters, numbers, dot, dash, underscore; start with a letter."
+    $HostName = Resolve-ShellToolsValidatedValue -Value $HostName -Prompt "Host IPv4, example 192.168.1.X" -Default "" -Validator ${function:Test-ShellToolsIPv4} -ErrorMessage "This is not an IPv4 address. Example: 192.168.1.187."
 
-    $defaultCheckPorts = if ($Role -match "proxmox") { "22;8006" } else { "22" }
-    $CheckPorts = Resolve-ShellToolsPortList -Value $CheckPorts -Prompt "Ports to check, separated by semicolon" -Default $defaultCheckPorts
+    $sshEnabled = Read-ShellToolsYesNo "SSH access to this host?" $true
+    $user = ""
+    $port = 22
+    $inSshConfig = $false
 
-    if (-not $Url -and $Role -match "proxmox") {
-        $Url = "https://{0}:8006" -f $HostName
-    }
-
-    $Url = Resolve-ShellToolsValidatedValue -Value $Url -Prompt "Web URL (optional)" -Default $Url -Validator ${function:Test-ShellToolsUrl} -ErrorMessage "Use a full URL like https://192.168.1.185:8006, or leave it empty."
-
-    $sshEnabled = Read-ShellToolsYesNo "Add this host to ~/.ssh/config?" $true
     if ($sshEnabled) {
-        Ensure-SshKey
-        Add-SshConfigHost -Name $Name -HostName $HostName -User $User -Port $Port
-        Write-Host "When the key is installed on the host, connect with: ssh $Name" -ForegroundColor Cyan
+        $user = Read-ShellToolsValidatedDefault -Prompt "SSH user" -Default "admin" -Validator ${function:Test-ShellToolsUser} -ErrorMessage "Use a simple SSH user, like admin, ubuntu, or deploy."
+        $port = Resolve-ShellToolsPortValue -Value 0 -Prompt "SSH port" -Default 22
+
+        if (Read-ShellToolsYesNo "Add this host to ~/.ssh/config?" $true) {
+            $inSshConfig = $true
+            Ensure-SshKey
+            Set-SshConfigHost -Name $Name -HostName $HostName -User $user -Port $port
+            Write-Host ""
+            Write-Host "Copy the public key above to the host, then type:" -ForegroundColor Cyan
+            Write-Host "  ssh $Name"
+            Write-Host "To list all SSH shortcuts, type:"
+            Write-Host "  sshhosts"
+            Write-Host ""
+        }
     }
 
-    Add-InfraHostRecord -Name $Name -HostName $HostName -User $User -Port $Port -Role $Role -CheckPorts $CheckPorts -Url $Url -SshEnabled:$sshEnabled
-    Write-Host "Infra host saved to $script:InfraHostsPath" -ForegroundColor Green
+    $docker = Read-ShellToolsYesNo "Does this host use Docker?" $false
+    if ($docker -and -not $sshEnabled) {
+        Write-Host "Docker discovery needs SSH later. You can still save the host now." -ForegroundColor Yellow
+    }
+
+    $services = Read-ShellToolsServices -HostName $HostName
+
+    Add-InfraHostRecord -Name $Name -HostName $HostName -SshEnabled:$sshEnabled -User $user -Port $port -InSshConfig:$inSshConfig -Docker:$docker -Services $services
+    Write-Host "Infra host saved: $Name ($HostName)" -ForegroundColor Green
 }
 
 function Select-InfraHostName {
@@ -619,22 +624,36 @@ function Edit-InfraHost {
     Write-Host ""
     Write-Host "Editing infra host: $selectedName" -ForegroundColor Cyan
 
-    $newName = Read-ShellToolsValidatedDefault -Prompt "Host alias" -Default $current.Name -Validator ${function:Test-ShellToolsInfraName} -ErrorMessage "Use a host alias like proxmox, docker-vm, or app01."
-    $newHostName = Read-ShellToolsValidatedDefault -Prompt "Host IPv4" -Default $current.HostName -Validator ${function:Test-ShellToolsIPv4} -ErrorMessage "This is not an IPv4 address. Example: 192.168.1.185."
-    $newUser = Read-ShellToolsValidatedDefault -Prompt "SSH user" -Default $current.User -Validator ${function:Test-ShellToolsUser} -ErrorMessage "Use a simple SSH user, like root, ubuntu, admin, or adrien."
-    $newPort = Resolve-ShellToolsPortValue -Value 0 -Prompt "SSH port" -Default ([int]$current.Port)
-    $newRole = Read-ShellToolsValidatedDefault -Prompt "Role" -Default $current.Role -Validator ${function:Test-ShellToolsRole} -ErrorMessage "Role cannot be empty and cannot contain commas."
-    $newCheckPorts = Resolve-ShellToolsPortList -Value "" -Prompt "Ports to check, separated by semicolon" -Default $current.CheckPorts
-    $newUrl = Read-ShellToolsValidatedDefault -Prompt "Web URL (optional)" -Default $current.Url -Validator ${function:Test-ShellToolsUrl} -ErrorMessage "Use a full URL like https://192.168.1.185:8006, or leave it empty."
+    $newName = Read-ShellToolsValidatedDefault -Prompt "Host alias" -Default $current.Name -Validator ${function:Test-ShellToolsInfraName} -ErrorMessage "Use a host alias like server1, docker-vm, or app01."
+    $newHostName = Read-ShellToolsValidatedDefault -Prompt "Host IPv4, example 192.168.1.X" -Default $current.HostName -Validator ${function:Test-ShellToolsIPv4} -ErrorMessage "This is not an IPv4 address. Example: 192.168.1.187."
 
-    $defaultSsh = ($current.SshEnabled -eq "true")
-    $sshEnabled = Read-ShellToolsYesNo "Update/add this host in ~/.ssh/config?" $defaultSsh
+    $sshEnabled = Read-ShellToolsYesNo "SSH access to this host?" ($current.SshEnabled -eq "true")
+    $user = ""
+    $port = 22
+    $inSshConfig = $false
+
     if ($sshEnabled) {
-        Ensure-SshKey
-        Set-SshConfigHost -Name $newName -HostName $newHostName -User $newUser -Port $newPort -PreviousName $current.Name
+        $user = Read-ShellToolsValidatedDefault -Prompt "SSH user" -Default $(if ($current.User) { $current.User } else { "admin" }) -Validator ${function:Test-ShellToolsUser} -ErrorMessage "Use a simple SSH user, like admin, ubuntu, or deploy."
+        $defaultPort = if ($current.Port -match '^\d+$') { [int]$current.Port } else { 22 }
+        $port = Resolve-ShellToolsPortValue -Value 0 -Prompt "SSH port" -Default $defaultPort
+
+        if (Read-ShellToolsYesNo "Update/add this host in ~/.ssh/config?" ($current.InSshConfig -eq "true")) {
+            $inSshConfig = $true
+            Ensure-SshKey
+            Set-SshConfigHost -Name $newName -HostName $newHostName -User $user -Port $port -PreviousName $current.Name
+            Write-Host ""
+            Write-Host "Copy the public key above to the host, then type:" -ForegroundColor Cyan
+            Write-Host "  ssh $newName"
+            Write-Host "To list all SSH shortcuts, type:"
+            Write-Host "  sshhosts"
+            Write-Host ""
+        }
     }
 
-    Add-InfraHostRecord -Name $newName -HostName $newHostName -User $newUser -Port $newPort -Role $newRole -CheckPorts $newCheckPorts -Url $newUrl -SshEnabled:$sshEnabled -PreviousName $current.Name
+    $docker = Read-ShellToolsYesNo "Does this host use Docker?" ($current.Docker -eq "true")
+    $services = Read-ShellToolsServices -HostName $newHostName -Existing $current.Services
+
+    Add-InfraHostRecord -Name $newName -HostName $newHostName -SshEnabled:$sshEnabled -User $user -Port $port -InSshConfig:$inSshConfig -Docker:$docker -Services $services -PreviousName $current.Name
     Write-Host "Infra host updated." -ForegroundColor Green
 }
 
@@ -644,8 +663,8 @@ function Initialize-ShellTools {
 
     $hosts = @(Get-InfraHosts)
     if ($hosts.Count -eq 0) {
-        if (Read-ShellToolsYesNo "Add your default Proxmox host at 192.168.1.185?" $true) {
-            Add-InfraHost -Name "proxmox" -HostName "192.168.1.185" -User "root" -Port 22 -Role "proxmox" -CheckPorts "22;8006" -Url "https://192.168.1.185:8006"
+        if (Read-ShellToolsYesNo "Configure your first infra host now?" $true) {
+            Add-InfraHost
         }
     }
 
@@ -655,125 +674,6 @@ function Initialize-ShellTools {
 
     Write-Host ""
     Write-Host "Setup complete. Run init to open the infra dashboard." -ForegroundColor Green
-}
-
-function Edit-Profile {
-    if (Get-Command cursor -ErrorAction SilentlyContinue) {
-        cursor $PROFILE
-    }
-    elseif (Get-Command code -ErrorAction SilentlyContinue) {
-        code $PROFILE
-    }
-    else {
-        notepad $PROFILE
-    }
-}
-
-Set-Alias ep Edit-Profile -Scope Global -Force
-
-function Reload-Profile {
-    . $PROFILE
-    Write-Host "Profile reloaded." -ForegroundColor Green
-}
-
-Set-Alias reloadp Reload-Profile -Scope Global -Force
-
-function add-func {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$name,
-
-        [Parameter(Mandatory = $true)]
-        [string]$body
-    )
-
-    Ensure-ShellToolsHome
-
-    if (Get-Command $name -ErrorAction SilentlyContinue) {
-        Write-Host "'$name' already exists in this session." -ForegroundColor Yellow
-        return
-    }
-
-    if (Select-String -Path $script:AliasToolsPath -Pattern "function\s+$([regex]::Escape($name))\b" -Quiet -ErrorAction SilentlyContinue) {
-        Write-Host "'$name' already exists in $script:AliasToolsPath." -ForegroundColor Yellow
-        return
-    }
-
-    $funcText = @"
-
-function $name {
-    $body
-}
-
-"@
-
-    Add-Content -Path $script:AliasToolsPath -Value $funcText
-    Invoke-Expression "function $name { $body }"
-
-    Write-Host "Function '$name' created and loaded." -ForegroundColor Green
-}
-
-function add-alias-cmd {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$name,
-
-        [Parameter(Mandatory = $true)]
-        [string]$command
-    )
-
-    add-func $name $command
-}
-
-function list-funcs {
-    Ensure-ShellToolsHome
-
-    $matches = Select-String -Path $script:AliasToolsPath -Pattern '^\s*function\s+([a-zA-Z0-9\-_]+)' -AllMatches -ErrorAction SilentlyContinue
-    if (-not $matches) {
-        Write-Host "No custom functions found." -ForegroundColor Yellow
-        return
-    }
-
-    $names = foreach ($match in $matches) {
-        foreach ($item in $match.Matches) {
-            $item.Groups[1].Value
-        }
-    }
-
-    $names | Sort-Object -Unique
-}
-
-Set-Alias lf list-funcs -Scope Global -Force
-
-function add-last-func {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$name
-    )
-
-    $last = (Get-History -Count 1).CommandLine
-    if (-not $last) {
-        Write-Host "No previous command found." -ForegroundColor Yellow
-        return
-    }
-
-    add-func $name $last
-}
-
-Set-Alias aa add-last-func -Scope Global -Force
-
-function vms {
-    if (Get-Command multipass -ErrorAction SilentlyContinue) {
-        Write-Host "Multipass VMs:" -ForegroundColor Cyan
-        multipass list
-    }
-    else {
-        Write-Host "Multipass is not installed." -ForegroundColor Yellow
-    }
-}
-
-function portforwarding {
-    netsh interface portproxy show all
 }
 
 function Test-ShellToolsTcpPort {
@@ -801,6 +701,58 @@ function Test-ShellToolsTcpPort {
     }
 }
 
+function Get-ShellToolsServicePort {
+    param([string]$Service)
+
+    try {
+        $uri = [Uri]$Service
+        if ($uri.Port -gt 0) {
+            return $uri.Port
+        }
+
+        if ($uri.Scheme -eq "https") {
+            return 443
+        }
+        return 80
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-ShellToolsServiceHost {
+    param([string]$Service)
+
+    try {
+        return ([Uri]$Service).Host
+    }
+    catch {
+        return ""
+    }
+}
+
+function Show-ShellToolsServices {
+    param([string]$Services)
+
+    if (-not $Services) {
+        return
+    }
+
+    foreach ($service in ($Services -split ";" | Where-Object { $_ })) {
+        $serviceHost = Get-ShellToolsServiceHost $service
+        $servicePort = Get-ShellToolsServicePort $service
+        if (-not $serviceHost -or -not $servicePort) {
+            Write-Host ("  service   {0,-34} INVALID" -f $service) -ForegroundColor Yellow
+            continue
+        }
+
+        $open = Test-ShellToolsTcpPort -HostName $serviceHost -Port $servicePort
+        $state = if ($open) { "OPEN" } else { "CLOSED" }
+        $color = if ($open) { "Green" } else { "Red" }
+        Write-Host ("  service   {0,-34} {1,-6} {2}:{3}" -f $service, $state, $serviceHost, $servicePort) -ForegroundColor $color
+    }
+}
+
 function Show-DockerServicesForHost {
     param(
         [Parameter(Mandatory = $true)]
@@ -811,22 +763,25 @@ function Show-DockerServicesForHost {
         return
     }
 
-    if ($HostRecord.SshEnabled -ne "true") {
-        return
-    }
-
-    if ($HostRecord.Role -notmatch "docker") {
+    if ($HostRecord.SshEnabled -ne "true" -or $HostRecord.Docker -ne "true") {
         return
     }
 
     try {
-        $containers = & ssh -o BatchMode=yes -o ConnectTimeout=3 $HostRecord.Name "docker ps --format '{{.Names}}|{{.Ports}}'" 2>$null
+        if ($HostRecord.InSshConfig -eq "true") {
+            $containers = & ssh -o BatchMode=yes -o ConnectTimeout=3 $HostRecord.Name "docker ps --format '{{.Names}}|{{.Ports}}'" 2>$null
+        }
+        else {
+            $target = "{0}@{1}" -f $HostRecord.User, $HostRecord.HostName
+            $containers = & ssh -o BatchMode=yes -o ConnectTimeout=3 -p $HostRecord.Port $target "docker ps --format '{{.Names}}|{{.Ports}}'" 2>$null
+        }
+
         if (-not $containers) {
             return
         }
 
         Write-Host ""
-        Write-Host ("Docker services on {0}" -f $HostRecord.Name) -ForegroundColor Yellow
+        Write-Host ("  Docker containers on {0}" -f $HostRecord.Name) -ForegroundColor Yellow
         foreach ($line in $containers) {
             $parts = $line -split "\|", 2
             $containerName = $parts[0]
@@ -834,21 +789,23 @@ function Show-DockerServicesForHost {
 
             if ($ports -match ":(\d+)->") {
                 $url = "http://{0}:{1}" -f $HostRecord.HostName, $matches[1]
-                Write-Host ("  OK   {0,-22} {1}" -f $containerName, $url) -ForegroundColor Green
+                Write-Host ("  docker    {0,-34} OPEN   {1}" -f $containerName, $url) -ForegroundColor Green
             }
             else {
-                Write-Host ("  INT  {0,-22} internal" -f $containerName) -ForegroundColor Yellow
+                Write-Host ("  docker    {0,-34} INT    internal" -f $containerName) -ForegroundColor Yellow
             }
         }
     }
     catch {
-        Write-Host ("Docker scan failed on {0}" -f $HostRecord.Name) -ForegroundColor Red
+        Write-Host ("  Docker scan failed on {0}" -f $HostRecord.Name) -ForegroundColor Red
     }
 }
 
 function init {
     Write-Host ""
-    Write-Host "HOMELAB COMMAND CENTER" -ForegroundColor Cyan
+    Write-Host "+------------------------------------------------------------+" -ForegroundColor Blue
+    Write-Host "| SHELL INFRA DASHBOARD                                      |" -ForegroundColor Blue
+    Write-Host "+------------------------------------------------------------+" -ForegroundColor Blue
     Write-Host ""
 
     $hosts = @(Get-InfraHosts)
@@ -858,10 +815,6 @@ function init {
             Initialize-ShellTools
             $hosts = @(Get-InfraHosts)
         }
-    }
-
-    if ($hosts.Count -eq 0) {
-        return
     }
 
     foreach ($hostRecord in $hosts) {
@@ -875,37 +828,20 @@ function init {
 
         $pingStatus = if ($pingOk) { "UP" } else { "DOWN" }
         $pingColor = if ($pingOk) { "Green" } else { "Red" }
-        Write-Host ("{0,-14} {1,-15} {2,-10} {3}" -f $hostRecord.Name, $hostRecord.HostName, $pingStatus, $hostRecord.Role) -ForegroundColor $pingColor
+        Write-Host ("{0,-14} {1,-15} {2,-8} ssh:{3,-5} docker:{4,-5}" -f $hostRecord.Name, $hostRecord.HostName, $pingStatus, $hostRecord.SshEnabled, $hostRecord.Docker) -ForegroundColor $pingColor
 
-        $normalizedPorts = Convert-ShellToolsPortList $hostRecord.CheckPorts
-        if (-not $normalizedPorts) {
-            Write-Host ("  invalid port list: {0}" -f $hostRecord.CheckPorts) -ForegroundColor Yellow
-            continue
+        if ($hostRecord.SshEnabled -eq "true" -and $hostRecord.Port -match '^\d+$') {
+            $open = Test-ShellToolsTcpPort -HostName $hostRecord.HostName -Port ([int]$hostRecord.Port)
+            $state = if ($open) { "OPEN" } else { "CLOSED" }
+            $color = if ($open) { "Green" } else { "Red" }
+            Write-Host ("  ssh       {0,-34} {1,-6} {2}:{3}" -f "ssh $($hostRecord.Name)", $state, $hostRecord.HostName, $hostRecord.Port) -ForegroundColor $color
         }
 
-        $ports = @($normalizedPorts -split ";" | Where-Object { $_ })
-        foreach ($portText in $ports) {
-            $port = 0
-            if ([int]::TryParse($portText, [ref]$port)) {
-                $open = Test-ShellToolsTcpPort -HostName $hostRecord.HostName -Port $port
-                $state = if ($open) { "OPEN" } else { "CLOSED" }
-                $color = if ($open) { "Green" } else { "Red" }
-                Write-Host ("  port {0,-6} {1}" -f $port, $state) -ForegroundColor $color
-            }
-        }
-
-        if ($hostRecord.Url) {
-            Write-Host ("  url        {0}" -f $hostRecord.Url) -ForegroundColor Cyan
-        }
-
+        Show-ShellToolsServices $hostRecord.Services
         Show-DockerServicesForHost -HostRecord $hostRecord
     }
 
     Write-Host ""
-}
-
-function init2 {
-    init
 }
 
 function infra-add {
@@ -924,51 +860,7 @@ function infra-list {
         return
     }
 
-    $hosts | Format-Table Name, HostName, User, Port, Role, CheckPorts, Url -AutoSize
-}
-
-function Remove-ShellToolsProfileHook {
-    param([string]$ProfilePath)
-
-    if (-not (Test-Path $ProfilePath)) {
-        return
-    }
-
-    $content = Get-Content -Raw -Path $ProfilePath
-    $pattern = '(?s)\r?\n?# >>> shell-alias-tools >>>.*?# <<< shell-alias-tools <<<\r?\n?'
-    $updated = [regex]::Replace($content, $pattern, [Environment]::NewLine)
-
-    if ($updated -ne $content) {
-        Set-Content -Path $ProfilePath -Value $updated.TrimEnd() -Encoding UTF8
-        Write-Host "Removed profile hook: $ProfilePath" -ForegroundColor Green
-    }
-}
-
-function Uninstall-ShellTools {
-    Write-Host ""
-    Write-Host "Shell Alias Tools uninstall" -ForegroundColor Cyan
-
-    if (-not (Read-ShellToolsYesNo "Remove Shell Alias Tools from your PowerShell profile?" $true)) {
-        return
-    }
-
-    Remove-ShellToolsProfileHook -ProfilePath $PROFILE
-
-    if (Read-ShellToolsYesNo "Delete $script:ShellToolsRoot including aliases and infra config?" $false) {
-        if (Test-Path $script:ShellToolsRoot) {
-            Remove-Item -LiteralPath $script:ShellToolsRoot -Recurse -Force
-            Write-Host "Deleted $script:ShellToolsRoot" -ForegroundColor Green
-        }
-    }
-    else {
-        Write-Host "Kept $script:ShellToolsRoot. SSH config is left untouched." -ForegroundColor Yellow
-    }
-
-    Write-Host "Restart PowerShell to finish unloading the current session." -ForegroundColor Cyan
-}
-
-function shelluninstall {
-    Uninstall-ShellTools
+    $hosts | Format-Table Name, HostName, SshEnabled, User, Port, InSshConfig, Docker, Services -AutoSize
 }
 
 function sshhosts {
@@ -1016,17 +908,370 @@ function sshhosts {
 }
 
 function check-tools {
-    $tools = @("git", "ssh", "curl", "fzf", "jq", "nc", "gh", "docker", "multipass")
-    $results = $tools | ForEach-Object {
-        $cmd = Get-Command $_ -ErrorAction SilentlyContinue
+    $results = Get-ShellToolsSmartToolList | ForEach-Object {
+        $path = Get-ShellToolsToolPath $_
         [PSCustomObject]@{
             Tool   = $_
-            Status = if ($cmd) { "OK" } else { "missing" }
-            Path   = if ($cmd) { $cmd.Source } else { "" }
+            Status = if ($path) { "OK" } else { "missing" }
+            Path   = $path
         }
     }
 
     $results | Format-Table -AutoSize
+}
+
+function Get-ShellToolsSmartToolSummary {
+    $tools = @(Get-ShellToolsSmartToolList)
+    $installed = @($tools | Where-Object { Get-ShellToolsToolPath $_ }).Count
+    return ("{0}/{1}" -f $installed, $tools.Count)
+}
+
+function Edit-Profile {
+    if (Get-Command cursor -ErrorAction SilentlyContinue) {
+        cursor $PROFILE
+    }
+    elseif (Get-Command code -ErrorAction SilentlyContinue) {
+        code $PROFILE
+    }
+    else {
+        notepad $PROFILE
+    }
+}
+
+function Reload-Profile {
+    . $PROFILE
+    Write-Host "Profile reloaded." -ForegroundColor Green
+}
+
+function add-func {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$name,
+
+        [Parameter(Mandatory = $true)]
+        [string]$body
+    )
+
+    Ensure-ShellToolsHome
+
+    if (Get-Command $name -ErrorAction SilentlyContinue) {
+        Write-Host "'$name' already exists in this session." -ForegroundColor Yellow
+        return
+    }
+
+    $funcText = @"
+
+function $name {
+    $body
+}
+
+"@
+
+    Add-Content -Path $script:AliasToolsPath -Value $funcText
+    Invoke-Expression "function $name { $body }"
+
+    Write-Host "Function '$name' created and loaded." -ForegroundColor Green
+}
+
+function list-funcs {
+    Ensure-ShellToolsHome
+
+    $matches = Select-String -Path $script:AliasToolsPath -Pattern '^\s*function\s+([a-zA-Z0-9\-_]+)' -AllMatches -ErrorAction SilentlyContinue
+    if (-not $matches) {
+        Write-Host "No custom functions found." -ForegroundColor Yellow
+        return
+    }
+
+    $names = foreach ($match in $matches) {
+        foreach ($item in $match.Matches) {
+            $item.Groups[1].Value
+        }
+    }
+
+    $names | Sort-Object -Unique
+}
+
+function add-last-func {
+    param([Parameter(Mandatory = $true)][string]$name)
+
+    $last = (Get-History -Count 1).CommandLine
+    if (-not $last) {
+        Write-Host "No previous command found." -ForegroundColor Yellow
+        return
+    }
+
+    add-func $name $last
+}
+
+function ll {
+    if (Get-Command eza -ErrorAction SilentlyContinue) {
+        eza -lah --git --icons=auto --group-directories-first @args
+    }
+    else {
+        Get-ChildItem -Force @args
+    }
+}
+
+function la {
+    if (Get-Command eza -ErrorAction SilentlyContinue) {
+        eza -a --icons=auto --group-directories-first @args
+    }
+    else {
+        Get-ChildItem -Force @args
+    }
+}
+
+function l {
+    if (Get-Command eza -ErrorAction SilentlyContinue) {
+        eza --icons=auto --group-directories-first @args
+    }
+    else {
+        Get-ChildItem @args
+    }
+}
+
+function lt {
+    if (Get-Command eza -ErrorAction SilentlyContinue) {
+        eza --tree --level=2 --icons=auto --git @args
+    }
+    else {
+        tree @args
+    }
+}
+
+function catp {
+    if (Get-Command bat -ErrorAction SilentlyContinue) {
+        bat --paging=always @args
+    }
+    else {
+        Get-Content @args
+    }
+}
+
+function mkcd {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    New-Item -ItemType Directory -Force -Path $Path | Out-Null
+    Set-Location $Path
+}
+
+function cdf {
+    param([string]$Root = ".")
+
+    if (-not (Get-Command fzf -ErrorAction SilentlyContinue)) {
+        Write-Host "fzf is missing. Run check-tools, then install dependencies if needed." -ForegroundColor Yellow
+        return
+    }
+
+    if (Get-Command fd -ErrorAction SilentlyContinue) {
+        $selected = fd --type d --hidden --exclude .git . $Root | fzf --height 40% --layout reverse --border --prompt "cd > "
+    }
+    else {
+        $selected = Get-ChildItem -Path $Root -Directory -Recurse -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '\\.git(\\|$)' } |
+            ForEach-Object { $_.FullName } |
+            fzf --height 40% --layout reverse --border --prompt "cd > "
+    }
+
+    if ($selected) {
+        Set-Location $selected
+    }
+}
+
+function ff {
+    param([string]$Root = ".")
+
+    if (-not (Get-Command fzf -ErrorAction SilentlyContinue)) {
+        Write-Host "fzf is missing. Run check-tools, then install dependencies if needed." -ForegroundColor Yellow
+        return
+    }
+
+    $preview = if (Get-Command bat -ErrorAction SilentlyContinue) {
+        "bat --style=numbers --color=always --line-range=:200 {}"
+    }
+    else {
+        "powershell -NoProfile -Command `"Get-Content -TotalCount 200 -LiteralPath '{}'`""
+    }
+
+    if (Get-Command fd -ErrorAction SilentlyContinue) {
+        return (fd --type f --hidden --exclude .git . $Root | fzf --height 70% --layout reverse --border --preview $preview --prompt "file > ")
+    }
+
+    if (Get-Command rg -ErrorAction SilentlyContinue) {
+        return (rg --files $Root | fzf --height 70% --layout reverse --border --preview $preview --prompt "file > ")
+    }
+
+    return (Get-ChildItem -Path $Root -File -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\.git(\\|$)' } |
+        ForEach-Object { $_.FullName } |
+        fzf --height 70% --layout reverse --border --preview $preview --prompt "file > ")
+}
+
+function fe {
+    param([string]$Root = ".")
+
+    $file = ff $Root
+    if (-not $file) {
+        return
+    }
+
+    if ($env:EDITOR -and (Get-Command $env:EDITOR -ErrorAction SilentlyContinue)) {
+        & $env:EDITOR $file
+    }
+    elseif (Get-Command nvim -ErrorAction SilentlyContinue) {
+        nvim $file
+    }
+    elseif (Get-Command code -ErrorAction SilentlyContinue) {
+        code $file
+    }
+    else {
+        notepad $file
+    }
+}
+
+function extract {
+    param([Parameter(Mandatory = $true)][string]$Archive)
+
+    if (-not (Test-Path $Archive)) {
+        Write-Host "Archive not found: $Archive" -ForegroundColor Yellow
+        return
+    }
+
+    if ($Archive -match '\.zip$') {
+        Expand-Archive -LiteralPath $Archive -DestinationPath .
+        return
+    }
+
+    if (Get-Command tar -ErrorAction SilentlyContinue) {
+        tar -xf $Archive
+        return
+    }
+
+    Write-Host "Unsupported archive or missing tar: $Archive" -ForegroundColor Yellow
+}
+
+function serve {
+    param([int]$Port = 8000)
+
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        python -m http.server $Port
+    }
+    elseif (Get-Command py -ErrorAction SilentlyContinue) {
+        py -m http.server $Port
+    }
+    else {
+        Write-Host "Python is missing, cannot start a quick file server." -ForegroundColor Yellow
+    }
+}
+
+function ports {
+    if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
+        Get-NetTCPConnection -State Listen | Sort-Object LocalPort | Format-Table LocalAddress, LocalPort, OwningProcess -AutoSize
+    }
+    else {
+        netstat -ano
+    }
+}
+
+function dps {
+    if (Get-Command docker -ErrorAction SilentlyContinue) {
+        docker ps --format "table {{.Names}}`t{{.Status}}`t{{.Ports}}"
+    }
+    else {
+        Write-Host "Docker is missing. Run check-tools, then install Docker if this machine should use it." -ForegroundColor Yellow
+    }
+}
+
+function pathlist {
+    $env:PATH -split ';'
+}
+
+function sysupdate {
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        winget upgrade --all
+    }
+    else {
+        Write-Host "winget is not available." -ForegroundColor Yellow
+    }
+}
+
+function please {
+    $last = (Get-History -Count 1).CommandLine
+    if (-not $last) {
+        Write-Host "No previous command found." -ForegroundColor Yellow
+        return
+    }
+
+    if (Get-Command sudo -ErrorAction SilentlyContinue) {
+        sudo pwsh -NoProfile -Command $last
+        return
+    }
+
+    Start-Process powershell.exe -Verb RunAs -ArgumentList @("-NoExit", "-Command", $last)
+}
+
+function myip {
+    try {
+        Invoke-RestMethod -Uri "https://ifconfig.me/ip"
+    }
+    catch {
+        Get-PrimaryIPv4
+    }
+}
+
+function g {
+    git @args
+}
+
+function gs {
+    git status --short --branch
+}
+
+function ga {
+    git add @args
+}
+
+function gc {
+    git commit @args
+}
+
+function gp {
+    git push @args
+}
+
+function gl {
+    git log --oneline --graph --decorate --all -20
+}
+
+function gd {
+    git diff @args
+}
+
+function Show-ShellDashboard {
+    if ($env:SHELL_TOOLS_NO_DASHBOARD -eq "1") {
+        return
+    }
+
+    $ip = Get-PrimaryIPv4
+    $hostCount = @(Get-InfraHosts).Count
+    $uptime = Get-ShortUptime
+    $disk = Get-ShellToolsDiskSummary
+    $toolSummary = Get-ShellToolsSmartToolSummary
+
+    Write-Host ""
+    Write-Host ("=" * 58) -ForegroundColor DarkGray
+    Write-Host ("ENV READY - {0}@{1}" -f (whoami), $env:COMPUTERNAME) -ForegroundColor Cyan
+    Write-Host ("IP: {0} | Uptime: {1}" -f $ip, $uptime) -ForegroundColor Magenta
+    Write-Host ("Disk: {0} | Infra hosts: {1}" -f $disk, $hostCount) -ForegroundColor DarkCyan
+    Write-Host ("Smart tools: {0} | Try: ll, ff, fe, cdf, ports, sysupdate" -f $toolSummary) -ForegroundColor Magenta
+    Write-Host ("=" * 58) -ForegroundColor DarkGray
+    Write-Host "init       -> infra dashboard"
+    Write-Host "sshhosts   -> connect to SSH host"
+    Write-Host "ff         -> fuzzy file finder"
+    Write-Host "infra-add  -> add server"
+    Write-Host "infra-edit -> modify server"
+    Write-Host "check-tools-> dependency check"
+    Write-Host "myhelp     -> all commands"
+    Write-Host ""
 }
 
 function myhelp {
@@ -1041,42 +1286,110 @@ function myhelp {
     Write-Host "sshhosts      Pick an SSH host and connect"
     Write-Host "check-tools   Check local CLI dependencies"
     Write-Host "shelluninstall Remove profile hook and optional data"
+    Write-Host "ll/la/l/lt    Smart listing via eza when available"
+    Write-Host "catp          Pretty file reading via bat when available"
+    Write-Host "cdf           Fuzzy cd into a directory with fzf"
+    Write-Host "ff            Fuzzy find a file with preview"
+    Write-Host "fe            Fuzzy find a file and open it in editor"
+    Write-Host "mkcd          Create a directory and cd into it"
+    Write-Host "please        Re-run the previous command elevated"
+    Write-Host "extract       Extract common archive formats"
+    Write-Host "serve         Start a quick HTTP file server"
+    Write-Host "ports         Show listening TCP ports"
+    Write-Host "dps           Show Docker containers"
+    Write-Host "pathlist      Print PATH one entry per line"
+    Write-Host "sysupdate     Update with winget"
     Write-Host "ep            Edit PowerShell profile"
     Write-Host "reloadp       Reload profile"
     Write-Host "add-func      Save a custom function"
     Write-Host "aa            Save the previous command as a function"
     Write-Host "lf            List saved functions"
-    Write-Host "vms           List Multipass VMs"
-    Write-Host "portforwarding Show Windows portproxy rules"
     Write-Host ""
 }
 
-Set-Alias shellsetup Initialize-ShellTools -Scope Global -Force
-Set-Alias myh myhelp -Scope Global -Force
+function Remove-ShellToolsProfileHook {
+    param([string]$ProfilePath)
 
-function Show-ShellDashboard {
-    if ($env:SHELL_TOOLS_NO_DASHBOARD -eq "1") {
+    if (-not (Test-Path $ProfilePath)) {
         return
     }
 
-    $ip = Get-PrimaryIPv4
-    $hostCount = @(Get-InfraHosts).Count
-    $uptime = Get-ShortUptime
-    $disk = Get-ShellToolsDiskSummary
+    $content = Get-Content -Raw -Path $ProfilePath
+    $pattern = '(?s)\r?\n?# >>> shell-alias-tools >>>.*?# <<< shell-alias-tools <<<\r?\n?'
+    $updated = [regex]::Replace($content, $pattern, [Environment]::NewLine)
 
-    Write-Host ""
-    Write-Host ("=" * 58) -ForegroundColor DarkGray
-    Write-Host ("ENV READY - {0}@{1}" -f (whoami), $env:COMPUTERNAME) -ForegroundColor Cyan
-    Write-Host ("IP: {0} | Uptime: {1}" -f $ip, $uptime) -ForegroundColor Magenta
-    Write-Host ("Disk: {0} | Infra hosts: {1}" -f $disk, $hostCount) -ForegroundColor DarkCyan
-    Write-Host ("=" * 58) -ForegroundColor DarkGray
-    Write-Host "init       -> infra dashboard"
-    Write-Host "sshhosts   -> connect to SSH host"
-    Write-Host "infra-add  -> add server"
-    Write-Host "infra-edit -> modify server"
-    Write-Host "check-tools-> dependency check"
-    Write-Host "myhelp     -> all commands"
-    Write-Host ""
+    if ($updated -ne $content) {
+        Set-Content -Path $ProfilePath -Value $updated.TrimEnd() -Encoding UTF8
+        Write-Host "Removed profile hook: $ProfilePath" -ForegroundColor Green
+    }
 }
+
+function Uninstall-ShellTools {
+    Write-Host ""
+    Write-Host "Shell Alias Tools uninstall" -ForegroundColor Cyan
+
+    if (-not (Read-ShellToolsYesNo "Remove Shell Alias Tools from your PowerShell profile?" $true)) {
+        return
+    }
+
+    Remove-ShellToolsProfileHook -ProfilePath $PROFILE
+
+    if (Read-ShellToolsYesNo "Delete $script:ShellToolsRoot including aliases and infra config?" $false) {
+        if (Test-Path $script:ShellToolsRoot) {
+            Remove-Item -LiteralPath $script:ShellToolsRoot -Recurse -Force
+            Write-Host "Deleted $script:ShellToolsRoot" -ForegroundColor Green
+        }
+    }
+    else {
+        Write-Host "Kept $script:ShellToolsRoot. SSH config is left untouched." -ForegroundColor Yellow
+    }
+
+    Write-Host "Restart PowerShell to finish unloading the current session." -ForegroundColor Cyan
+}
+
+function shelluninstall {
+    Uninstall-ShellTools
+}
+
+function Get-ShellToolsGitBranch {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        return ""
+    }
+
+    try {
+        $branch = git branch --show-current 2>$null
+        if (-not $branch) {
+            $branch = git rev-parse --short HEAD 2>$null
+        }
+        if ($branch) {
+            return " ($branch)"
+        }
+    }
+    catch {
+        return ""
+    }
+
+    return ""
+}
+
+if ($env:SHELL_TOOLS_NO_PROMPT -ne "1") {
+    function global:prompt {
+        $branch = Get-ShellToolsGitBranch
+        Write-Host ("{0}@{1} " -f $env:USERNAME, $env:COMPUTERNAME) -NoNewline -ForegroundColor Cyan
+        Write-Host (Get-Location) -NoNewline -ForegroundColor Blue
+        if ($branch) {
+            Write-Host $branch -NoNewline -ForegroundColor Yellow
+        }
+        Write-Host ""
+        return "PS> "
+    }
+}
+
+Set-Alias ep Edit-Profile -Scope Global -Force
+Set-Alias reloadp Reload-Profile -Scope Global -Force
+Set-Alias aa add-last-func -Scope Global -Force
+Set-Alias lf list-funcs -Scope Global -Force
+Set-Alias shellsetup Initialize-ShellTools -Scope Global -Force
+Set-Alias myh myhelp -Scope Global -Force
 
 Show-ShellDashboard

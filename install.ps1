@@ -61,147 +61,60 @@ function Confirm-InstallChoice {
     }
 }
 
-function Read-InstallDefault {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Prompt,
+function Get-InstallToolPath {
+    param([string]$Tool)
 
-        [string]$Default = ""
-    )
-
-    if ($Yes) {
-        return $Default
-    }
-
-    if ($Default) {
-        $value = Read-Host "$Prompt [$Default]"
-        if ([string]::IsNullOrWhiteSpace($value)) {
-            return $Default
+    switch ($Tool) {
+        "bash-completion" { return "PowerShell completion" }
+        "bat" {
+            $cmd = Get-Command bat -ErrorAction SilentlyContinue
+            if (-not $cmd) { $cmd = Get-Command batcat -ErrorAction SilentlyContinue }
+            if ($cmd) { return $cmd.Source }
+            return ""
         }
-        return $value.Trim()
-    }
-
-    return (Read-Host $Prompt).Trim()
-}
-
-function Test-InstallInfraName {
-    param([string]$Value)
-    return ($Value -match '^[A-Za-z][A-Za-z0-9._-]*$')
-}
-
-function Test-InstallIPv4 {
-    param([string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $false
-    }
-
-    $parts = $Value.Trim() -split '\.'
-    if ($parts.Count -ne 4) {
-        return $false
-    }
-
-    foreach ($part in $parts) {
-        if ($part -notmatch '^\d{1,3}$') {
-            return $false
+        "fd" {
+            $cmd = Get-Command fd -ErrorAction SilentlyContinue
+            if (-not $cmd) { $cmd = Get-Command fdfind -ErrorAction SilentlyContinue }
+            if ($cmd) { return $cmd.Source }
+            return ""
         }
-
-        $number = [int]$part
-        if ($number -lt 0 -or $number -gt 255) {
-            return $false
+        "ripgrep" {
+            $cmd = Get-Command rg -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Source }
+            return ""
         }
-    }
-
-    return $true
-}
-
-function Test-InstallUser {
-    param([string]$Value)
-    return ($Value -match '^[A-Za-z0-9._-]+[$]?$')
-}
-
-function Test-InstallRole {
-    param([string]$Value)
-    return (-not [string]::IsNullOrWhiteSpace($Value) -and $Value -notmatch '[,\r\n]')
-}
-
-function Test-InstallUrl {
-    param([string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $true
-    }
-
-    $uri = $null
-    return [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri) -and $uri.Scheme -in @("http", "https")
-}
-
-function Test-InstallPort {
-    param([string]$Value)
-
-    if ($Value -notmatch '^\d+$') {
-        return $false
-    }
-
-    $port = [int]$Value
-    return ($port -ge 1 -and $port -le 65535)
-}
-
-function Convert-InstallPortList {
-    param([string]$Value)
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $null
-    }
-
-    $ports = @()
-    $items = $Value.Trim() -split '[;,\s]+' | Where-Object { $_ }
-    foreach ($item in $items) {
-        if (-not (Test-InstallPort $item)) {
-            return $null
+        "neovim" {
+            $cmd = Get-Command nvim -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Source }
+            return ""
         }
-        $ports += ([int]$item).ToString()
-    }
-
-    if ($ports.Count -eq 0) {
-        return $null
-    }
-
-    return (($ports | Select-Object -Unique) -join ";")
-}
-
-function Read-InstallValidated {
-    param(
-        [string]$Prompt,
-        [string]$Default,
-        [scriptblock]$Validator,
-        [string]$ErrorMessage
-    )
-
-    while ($true) {
-        $value = Read-InstallDefault $Prompt $Default
-        if (& $Validator $value) {
-            return $value
+        "nc" {
+            $cmd = Get-Command nc -ErrorAction SilentlyContinue
+            if (-not $cmd) { $cmd = Get-Command ncat -ErrorAction SilentlyContinue }
+            if ($cmd) { return $cmd.Source }
+            return ""
         }
-
-        Write-Warn $ErrorMessage
-    }
-}
-
-function Read-InstallPorts {
-    param(
-        [string]$Prompt,
-        [string]$Default
-    )
-
-    while ($true) {
-        $value = Read-InstallDefault $Prompt $Default
-        $normalized = Convert-InstallPortList $value
-        if ($normalized) {
-            return $normalized
+        "tree" {
+            $cmd = Get-Command tree.com -ErrorAction SilentlyContinue
+            if (-not $cmd) { $cmd = Get-Command tree -ErrorAction SilentlyContinue }
+            if ($cmd) { return $cmd.Source }
+            return ""
         }
-
-        Write-Warn "This is not a valid port list. Use values like 22;8006 or 22, 8006."
+        "unzip" {
+            $cmd = Get-Command Expand-Archive -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Name }
+            return ""
+        }
+        "zip" {
+            $cmd = Get-Command Compress-Archive -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Name }
+            return ""
+        }
+        default {
+            $cmd = Get-Command $Tool -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd.Source }
+            return ""
+        }
     }
 }
 
@@ -228,7 +141,7 @@ function Ensure-InstallFiles {
 
     $hostsPath = Join-Path $InstallDir "infra-hosts.csv"
     if (-not (Test-Path $hostsPath)) {
-        "Name,HostName,User,Port,Role,CheckPorts,Url,SshEnabled" |
+        "Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services" |
             Set-Content -Path $hostsPath -Encoding UTF8
     }
 
@@ -266,60 +179,99 @@ function Add-ProfileHook {
     Write-Ok "Profile hook added: $profilePath"
 }
 
-function Install-Dependencies {
+function Install-WindowsDependency {
+    param([string]$Tool)
+
     $wingetPackages = @{
         git       = "Git.Git"
+        wget      = "GNU.Wget2"
         fzf       = "junegunn.fzf"
-        gh        = "GitHub.cli"
+        bat       = "sharkdp.bat"
+        eza       = "eza-community.eza"
+        zoxide    = "ajeetdsouza.zoxide"
+        ripgrep   = "BurntSushi.ripgrep.MSVC"
+        fd        = "sharkdp.fd"
         jq        = "jqlang.jq"
+        yq        = "MikeFarah.yq"
+        btop      = "aristocratos.btop4win"
+        duf       = "muesli.duf"
+        neovim    = "Neovim.Neovim"
+        gh        = "GitHub.cli"
         docker    = "Docker.DockerDesktop"
         multipass = "Canonical.Multipass"
     }
 
-    foreach ($tool in @("git", "ssh", "curl", "fzf", "jq", "gh", "docker", "multipass")) {
-        if (Get-Command $tool -ErrorAction SilentlyContinue) {
-            Write-Ok "$tool already installed."
-            continue
-        }
-
-        $default = $true
-        if ($tool -in @("docker", "multipass")) {
-            $default = $false
-        }
-
-        if (-not (Confirm-InstallChoice "Install missing dependency '$tool'?" $default)) {
-            continue
-        }
-
-        if ($tool -eq "ssh") {
-            if (Confirm-InstallChoice "Install the Windows OpenSSH Client capability?" $true) {
-                try {
-                    Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0 | Out-Null
-                }
-                catch {
-                    Write-Warn "OpenSSH Client install failed. You may need an elevated PowerShell session."
-                }
-            }
-            continue
-        }
-
-        if ($tool -eq "curl") {
-            Write-Warn "curl is normally included with modern Windows. Please install it manually if this machine does not have it."
-            continue
-        }
-
-        if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-            Write-Warn "winget is not available. Please install $tool manually."
-            continue
-        }
-
-        if ($wingetPackages.ContainsKey($tool)) {
+    if ($Tool -eq "ssh") {
+        if (Confirm-InstallChoice "Install the Windows OpenSSH Client capability?" $true) {
             try {
-                winget install --id $wingetPackages[$tool] --exact --accept-source-agreements --accept-package-agreements
+                Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0 | Out-Null
             }
             catch {
-                Write-Warn "winget install failed for $tool."
+                Write-Warn "OpenSSH Client install failed. You may need an elevated PowerShell session."
             }
+        }
+        return
+    }
+
+    if ($Tool -in @("curl", "bash-completion", "tree", "unzip", "zip")) {
+        Write-Warn "$Tool is usually built into modern Windows or PowerShell. No extra package was installed."
+        return
+    }
+
+    if ($Tool -in @("rsync", "tmux", "htop", "nc")) {
+        Write-Warn "No reliable native Windows package mapping is configured for $Tool yet."
+        return
+    }
+
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Warn "winget is not available. Please install $Tool manually."
+        return
+    }
+
+    if (-not $wingetPackages.ContainsKey($Tool)) {
+        Write-Warn "No winget package mapping is configured for $Tool."
+        return
+    }
+
+    try {
+        winget install --id $wingetPackages[$Tool] --exact --accept-source-agreements --accept-package-agreements
+    }
+    catch {
+        Write-Warn "winget install failed for $Tool."
+    }
+}
+
+function Install-Dependencies {
+    $requiredTools = @(
+        "git", "ssh", "curl", "wget", "fzf", "bash-completion", "bat", "eza", "zoxide",
+        "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
+        "btop", "htop", "duf", "neovim"
+    )
+    $optionalTools = @("gh", "docker", "multipass")
+
+    Write-Step "Dependency setup"
+    Write-Step "On a new VM, answer yes to the smart-shell dependencies for the full cockpit experience."
+
+    foreach ($tool in $requiredTools) {
+        $path = Get-InstallToolPath $tool
+        $status = if ($path) { "installed at $path" } else { "missing" }
+        $default = -not [bool]$path
+
+        if (-not (Confirm-InstallChoice "Install/update smart-shell dependency '$tool'? ($status)" $default)) {
+            Write-Warn "$tool is useful for the best Shell Alias Tools experience. Some commands may fall back or fail."
+            continue
+        }
+
+        Install-WindowsDependency $tool
+    }
+
+    foreach ($tool in $optionalTools) {
+        $path = Get-InstallToolPath $tool
+        $status = if ($path) { "installed at $path" } else { "missing" }
+        $default = ($tool -eq "gh" -and -not [bool]$path)
+
+        if (Confirm-InstallChoice "Install/update optional dependency '$tool'? ($status)" $default) {
+            Install-WindowsDependency $tool
         }
     }
 }
@@ -345,146 +297,16 @@ function Enable-LocalSshServer {
     }
 }
 
-function Ensure-SshKey {
-    $sshDir = Join-Path $HOME ".ssh"
-    $keyPath = Join-Path $sshDir "id_ed25519"
-    $publicKeyPath = "$keyPath.pub"
-
-    if (-not (Test-Path $sshDir)) {
-        New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
-    }
-
-    if (-not (Test-Path $publicKeyPath)) {
-        if (Confirm-InstallChoice "Generate an ed25519 SSH key?" $true) {
-            $comment = "{0}@{1}-shell-alias-tools" -f $env:USERNAME, $env:COMPUTERNAME
-            ssh-keygen -t ed25519 -C $comment -f $keyPath
-        }
-    }
-
-    if (Test-Path $publicKeyPath) {
-        Write-Host ""
-        Write-Host "Public key:" -ForegroundColor Cyan
-        Get-Content $publicKeyPath
-        Write-Host ""
-        Write-Host "Copy it to the remote host's ~/.ssh/authorized_keys." -ForegroundColor Yellow
-    }
-}
-
-function Add-SshConfigHost {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Name,
-
-        [Parameter(Mandatory = $true)]
-        [string]$HostName,
-
-        [Parameter(Mandatory = $true)]
-        [string]$User,
-
-        [int]$Port = 22
-    )
-
-    $sshDir = Join-Path $HOME ".ssh"
-    $configPath = Join-Path $sshDir "config"
-
-    if (-not (Test-Path $sshDir)) {
-        New-Item -ItemType Directory -Force -Path $sshDir | Out-Null
-    }
-
-    if (-not (Test-Path $configPath)) {
-        New-Item -ItemType File -Force -Path $configPath | Out-Null
-    }
-
-    $escaped = [regex]::Escape($Name)
-    if (Select-String -Path $configPath -Pattern "^\s*Host\s+$escaped\s*$" -Quiet -ErrorAction SilentlyContinue) {
-        Write-Warn "SSH config already contains Host $Name."
-        return
-    }
-
-    $entry = @"
-
-Host $Name
-    HostName $HostName
-    User $User
-    Port $Port
-    ServerAliveInterval 30
-    ServerAliveCountMax 3
-"@
-
-    Add-Content -Path $configPath -Value $entry
-    Write-Ok "SSH config added: ssh $Name"
-}
-
-function Get-InfraHostsPath {
-    return (Join-Path $InstallDir "infra-hosts.csv")
-}
-
-function Get-InfraHosts {
-    $hostsPath = Get-InfraHostsPath
-    if (-not (Test-Path $hostsPath)) {
-        return @()
-    }
-
-    return @(Import-Csv -Path $hostsPath | Where-Object { $_.Name -and $_.HostName })
-}
-
-function Add-InfraHost {
-    param(
-        [string]$Name = "proxmox",
-        [string]$HostName = "192.168.1.185",
-        [string]$User = "root",
-        [int]$Port = 22,
-        [string]$Role = "proxmox",
-        [string]$CheckPorts = "22;8006",
-        [string]$Url = "https://192.168.1.185:8006"
-    )
-
-    Write-Host ""
-    Write-Step "Infra host onboarding"
-
-    $Name = Read-InstallValidated -Prompt "Host alias" -Default $Name -Validator ${function:Test-InstallInfraName} -ErrorMessage "Use a host alias like proxmox, docker-vm, or app01. Letters, numbers, dot, dash, underscore; start with a letter."
-    $HostName = Read-InstallValidated -Prompt "Host IPv4" -Default $HostName -Validator ${function:Test-InstallIPv4} -ErrorMessage "This is not an IPv4 address. Example: 192.168.1.185."
-    $User = Read-InstallValidated -Prompt "SSH user" -Default $User -Validator ${function:Test-InstallUser} -ErrorMessage "Use a simple SSH user, like root, ubuntu, admin, or adrien."
-    $Port = [int](Read-InstallValidated -Prompt "SSH port" -Default ([string]$Port) -Validator ${function:Test-InstallPort} -ErrorMessage "This is not a valid TCP port. Use a number from 1 to 65535.")
-    $Role = Read-InstallValidated -Prompt "Role" -Default $Role -Validator ${function:Test-InstallRole} -ErrorMessage "Role cannot be empty and cannot contain commas."
-    $CheckPorts = Read-InstallPorts -Prompt "Ports to check, separated by semicolon" -Default $CheckPorts
-    $Url = Read-InstallValidated -Prompt "Web URL, optional" -Default $Url -Validator ${function:Test-InstallUrl} -ErrorMessage "Use a full URL like https://192.168.1.185:8006, or leave it empty."
-
-    $sshEnabled = $false
-    if (Confirm-InstallChoice "Add this host to ~/.ssh/config?" $true) {
-        $sshEnabled = $true
-        Ensure-SshKey
-        Add-SshConfigHost -Name $Name -HostName $HostName -User $User -Port $Port
-        Write-Host "When the key is installed on the host, connect with: ssh $Name" -ForegroundColor Cyan
-    }
-
-    $records = @(Get-InfraHosts | Where-Object { $_.Name -ne $Name })
-    $records += [PSCustomObject]@{
-        Name       = $Name
-        HostName   = $HostName
-        User       = $User
-        Port       = $Port
-        Role       = $Role
-        CheckPorts = $CheckPorts
-        Url        = $Url
-        SshEnabled = $sshEnabled.ToString().ToLowerInvariant()
-    }
-
-    $records | Sort-Object Name | Export-Csv -Path (Get-InfraHostsPath) -NoTypeInformation -Encoding UTF8
-    Write-Ok "Infra host saved: $Name ($HostName)"
-}
-
 function Configure-Infra {
-    $hosts = @(Get-InfraHosts)
+    param([string]$RuntimePath)
 
-    if ($hosts.Count -eq 0) {
-        if (Confirm-InstallChoice "Add your default Proxmox host at 192.168.1.185?" $true) {
-            Add-InfraHost
-        }
-    }
+    $previousNoDashboard = $env:SHELL_TOOLS_NO_DASHBOARD
+    $env:SHELL_TOOLS_NO_DASHBOARD = "1"
+    . $RuntimePath
+    $env:SHELL_TOOLS_NO_DASHBOARD = $previousNoDashboard
 
-    while (Confirm-InstallChoice "Add another infra server?" $false) {
-        Add-InfraHost -Name "server" -HostName "192.168.1.10" -User $env:USERNAME -Port 22 -Role "server" -CheckPorts "22" -Url ""
+    if (Get-Command shellsetup -ErrorAction SilentlyContinue) {
+        shellsetup
     }
 }
 
@@ -500,16 +322,19 @@ function Main {
     }
 
     if (-not $SkipInfra) {
-        Configure-Infra
+        Configure-Infra -RuntimePath $runtimePath
     }
 
     Write-Ok "Install complete."
     Write-Host ""
-    Write-Host "Restart PowerShell or run:" -ForegroundColor Cyan
+    Write-Host "IMPORTANT: restart PowerShell to apply the effect." -ForegroundColor Cyan
+    Write-Host "Run this now to reload your current PowerShell profile:"
     Write-Host ". '$runtimePath'"
     Write-Host ""
     Write-Host "Then try:" -ForegroundColor Cyan
     Write-Host "init"
+    Write-Host "ll"
+    Write-Host "ff"
     Write-Host "sshhosts"
     Write-Host "check-tools"
 }

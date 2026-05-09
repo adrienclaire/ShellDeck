@@ -353,52 +353,104 @@ linux_package_for_tool() {
     apt:git) printf "git" ;;
     apt:ssh) printf "openssh-client" ;;
     apt:curl) printf "curl" ;;
+    apt:wget) printf "wget" ;;
     apt:fzf) printf "fzf" ;;
     apt:bash-completion) printf "bash-completion" ;;
     apt:bat) printf "bat" ;;
     apt:eza) printf "eza" ;;
     apt:zoxide) printf "zoxide" ;;
+    apt:ripgrep) printf "ripgrep" ;;
+    apt:fd) printf "fd-find" ;;
     apt:jq) printf "jq" ;;
+    apt:yq) printf "yq" ;;
     apt:nc) printf "netcat-openbsd" ;;
+    apt:tree) printf "tree" ;;
+    apt:unzip) printf "unzip" ;;
+    apt:zip) printf "zip" ;;
+    apt:rsync) printf "rsync" ;;
+    apt:tmux) printf "tmux" ;;
+    apt:btop) printf "btop" ;;
+    apt:htop) printf "htop" ;;
+    apt:duf) printf "duf" ;;
+    apt:neovim) printf "neovim" ;;
     apt:gh) printf "gh" ;;
     apt:docker) printf "docker.io" ;;
     apt:multipass) printf "multipass" ;;
     dnf:git) printf "git" ;;
     dnf:ssh) printf "openssh-clients" ;;
     dnf:curl) printf "curl" ;;
+    dnf:wget) printf "wget" ;;
     dnf:fzf) printf "fzf" ;;
     dnf:bash-completion) printf "bash-completion" ;;
     dnf:bat) printf "bat" ;;
     dnf:eza) printf "eza" ;;
     dnf:zoxide) printf "zoxide" ;;
+    dnf:ripgrep) printf "ripgrep" ;;
+    dnf:fd) printf "fd-find" ;;
     dnf:jq) printf "jq" ;;
+    dnf:yq) printf "yq" ;;
     dnf:nc) printf "nmap-ncat" ;;
+    dnf:tree) printf "tree" ;;
+    dnf:unzip) printf "unzip" ;;
+    dnf:zip) printf "zip" ;;
+    dnf:rsync) printf "rsync" ;;
+    dnf:tmux) printf "tmux" ;;
+    dnf:btop) printf "btop" ;;
+    dnf:htop) printf "htop" ;;
+    dnf:duf) printf "duf" ;;
+    dnf:neovim) printf "neovim" ;;
     dnf:gh) printf "gh" ;;
     dnf:docker) printf "docker" ;;
     dnf:multipass) printf "multipass" ;;
     pacman:git) printf "git" ;;
     pacman:ssh) printf "openssh" ;;
     pacman:curl) printf "curl" ;;
+    pacman:wget) printf "wget" ;;
     pacman:fzf) printf "fzf" ;;
     pacman:bash-completion) printf "bash-completion" ;;
     pacman:bat) printf "bat" ;;
     pacman:eza) printf "eza" ;;
     pacman:zoxide) printf "zoxide" ;;
+    pacman:ripgrep) printf "ripgrep" ;;
+    pacman:fd) printf "fd" ;;
     pacman:jq) printf "jq" ;;
+    pacman:yq) printf "yq" ;;
     pacman:nc) printf "gnu-netcat" ;;
+    pacman:tree) printf "tree" ;;
+    pacman:unzip) printf "unzip" ;;
+    pacman:zip) printf "zip" ;;
+    pacman:rsync) printf "rsync" ;;
+    pacman:tmux) printf "tmux" ;;
+    pacman:btop) printf "btop" ;;
+    pacman:htop) printf "htop" ;;
+    pacman:duf) printf "duf" ;;
+    pacman:neovim) printf "neovim" ;;
     pacman:gh) printf "github-cli" ;;
     pacman:docker) printf "docker" ;;
     pacman:multipass) printf "multipass" ;;
     apk:git) printf "git" ;;
     apk:ssh) printf "openssh-client" ;;
     apk:curl) printf "curl" ;;
+    apk:wget) printf "wget" ;;
     apk:fzf) printf "fzf" ;;
     apk:bash-completion) printf "bash-completion" ;;
     apk:bat) printf "bat" ;;
     apk:eza) printf "eza" ;;
     apk:zoxide) printf "zoxide" ;;
+    apk:ripgrep) printf "ripgrep" ;;
+    apk:fd) printf "fd" ;;
     apk:jq) printf "jq" ;;
+    apk:yq) printf "yq" ;;
     apk:nc) printf "netcat-openbsd" ;;
+    apk:tree) printf "tree" ;;
+    apk:unzip) printf "unzip" ;;
+    apk:zip) printf "zip" ;;
+    apk:rsync) printf "rsync" ;;
+    apk:tmux) printf "tmux" ;;
+    apk:btop) printf "btop" ;;
+    apk:htop) printf "htop" ;;
+    apk:duf) printf "duf" ;;
+    apk:neovim) printf "neovim" ;;
     apk:gh) printf "github-cli" ;;
     apk:docker) printf "docker" ;;
     apk:multipass) printf "" ;;
@@ -415,6 +467,21 @@ detect_linux_package_manager() {
     printf "pacman"
   elif command -v apk >/dev/null 2>&1; then
     printf "apk"
+  fi
+}
+
+apt_update_and_offer_upgrade() {
+  local upgrades
+
+  sudo_cmd apt-get update
+
+  upgrades="$(apt list --upgradable 2>/dev/null | sed '1d' | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+  upgrades="${upgrades:-0}"
+
+  if [ "$upgrades" -gt 0 ] 2>/dev/null; then
+    if prompt_yes_no "$upgrades package upgrade(s) are available. Run apt-get upgrade now?" "no"; then
+      sudo_cmd apt-get upgrade -y
+    fi
   fi
 }
 
@@ -480,6 +547,15 @@ dependency_path() {
     nc)
       command -v nc 2>/dev/null || command -v ncat 2>/dev/null
       ;;
+    ripgrep)
+      command -v rg 2>/dev/null
+      ;;
+    fd)
+      command -v fd 2>/dev/null || command -v fdfind 2>/dev/null
+      ;;
+    neovim)
+      command -v nvim 2>/dev/null
+      ;;
     *)
       command -v "$tool" 2>/dev/null
       ;;
@@ -494,17 +570,18 @@ install_dependencies() {
   local status
   local install_label
   local command_path
-  local required_tools="git ssh curl fzf bash-completion bat eza zoxide jq nc"
+  local required_tools="git ssh curl wget fzf bash-completion bat eza zoxide ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim"
   local optional_tools="gh docker multipass"
 
   if [ "$os" = "linux" ]; then
     manager="$(detect_linux_package_manager)"
     if [ -n "$manager" ] && [ "$manager" = "apt" ]; then
-      sudo_cmd apt-get update
+      apt_update_and_offer_upgrade
     fi
   fi
 
   info "Dependency setup"
+  info "On a new VM, answer yes to the smart-shell dependencies for the full cockpit experience."
   info "You will be asked about each dependency directly."
 
   for tool in $required_tools; do
@@ -575,7 +652,7 @@ install_dependencies() {
 
 enable_ssh_server_linux() {
   if command -v apt-get >/dev/null 2>&1; then
-    sudo_cmd apt-get update
+    apt_update_and_offer_upgrade
     sudo_cmd apt-get install -y openssh-server
   elif command -v dnf >/dev/null 2>&1; then
     sudo_cmd dnf install -y openssh-server
@@ -746,6 +823,8 @@ main() {
   printf "  source \"%s/shell-tools.sh\"\n" "$INSTALL_DIR"
   printf "\nThen try:\n"
   printf "  init\n"
+  printf "  ll\n"
+  printf "  ff\n"
   printf "  sshhosts\n"
   printf "  check-tools\n"
 }

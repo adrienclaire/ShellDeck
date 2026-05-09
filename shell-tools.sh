@@ -93,10 +93,49 @@ _shell_tools_dependency_path() {
     nc)
       command -v nc 2>/dev/null || command -v ncat 2>/dev/null
       ;;
+    ripgrep)
+      command -v rg 2>/dev/null
+      ;;
+    fd)
+      command -v fd 2>/dev/null || command -v fdfind 2>/dev/null
+      ;;
+    neovim)
+      command -v nvim 2>/dev/null
+      ;;
     *)
       command -v "$tool" 2>/dev/null
       ;;
   esac
+}
+
+_shell_tools_fd_command() {
+  _shell_tools_dependency_path fd
+}
+
+_shell_tools_editor() {
+  if [ -n "${EDITOR:-}" ] && command -v "$EDITOR" >/dev/null 2>&1; then
+    printf "%s" "$EDITOR"
+  elif command -v nvim >/dev/null 2>&1; then
+    printf "nvim"
+  elif command -v vim >/dev/null 2>&1; then
+    printf "vim"
+  elif command -v nano >/dev/null 2>&1; then
+    printf "nano"
+  else
+    printf "vi"
+  fi
+}
+
+_shell_tools_sort_human() {
+  if sort -h </dev/null >/dev/null 2>&1; then
+    sort -h
+  else
+    sort
+  fi
+}
+
+_shell_tools_smart_tool_list() {
+  printf "%s\n" git ssh curl wget fzf bash-completion bat eza zoxide ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim gh docker multipass
 }
 
 _shell_tools_bat_command() {
@@ -185,6 +224,24 @@ _shell_tools_configure_zoxide() {
   export SHELL_TOOLS_ZOXIDE_READY=1
 }
 
+_shell_tools_git_branch() {
+  local branch
+
+  command -v git >/dev/null 2>&1 || return 0
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+  branch="$(git branch --show-current 2>/dev/null || true)"
+  [ -n "$branch" ] || branch="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  [ -n "$branch" ] && printf " (%s)" "$branch"
+}
+
+_shell_tools_configure_prompt() {
+  [ -n "${BASH_VERSION:-}" ] || return 0
+  [ "${SHELL_TOOLS_NO_PROMPT:-}" = "1" ] && return 0
+
+  PS1='\[\033[1;36m\]\u@\h\[\033[0m\] \[\033[1;34m\]\w\[\033[33m\]$(_shell_tools_git_branch)\[\033[0m\]\n\$ '
+}
+
 _shell_tools_alias_default() {
   local name="$1"
   shift || true
@@ -213,6 +270,18 @@ _shell_tools_apply_smart_aliases() {
   fi
 
   _shell_tools_alias_default cls "clear"
+  _shell_tools_alias_default c "clear"
+  _shell_tools_alias_default h "history"
+  _shell_tools_alias_default j "jobs -l"
+  _shell_tools_alias_default g "git"
+  _shell_tools_alias_default gs "git status --short --branch"
+  _shell_tools_alias_default ga "git add"
+  _shell_tools_alias_default gc "git commit"
+  _shell_tools_alias_default gp "git push"
+  _shell_tools_alias_default gl "git log --oneline --graph --decorate --all -20"
+  _shell_tools_alias_default gd "git diff"
+  _shell_tools_alias_default myip "curl -4 ifconfig.me"
+  _shell_tools_alias_default dfh "df -h"
   _shell_tools_alias_default .. "cd .."
   _shell_tools_alias_default ... "cd ../.."
   _shell_tools_alias_default .... "cd ../../.."
@@ -223,6 +292,7 @@ _shell_tools_configure_smart_shell() {
   _shell_tools_configure_completion
   _shell_tools_configure_fzf
   _shell_tools_configure_zoxide
+  _shell_tools_configure_prompt
   _shell_tools_apply_smart_aliases
 }
 
@@ -259,14 +329,151 @@ mkcd() {
 cdf() {
   local root="${1:-.}"
   local dir
+  local fd_cmd
 
   command -v fzf >/dev/null 2>&1 || {
     echo "fzf is missing. Run check-tools, then reinstall dependencies if needed."
     return 1
   }
 
-  dir="$(find "$root" -type d -not -path '*/.git/*' 2>/dev/null | fzf --height 40% --layout=reverse --border --prompt "cd > ")" || return
+  fd_cmd="$(_shell_tools_fd_command 2>/dev/null || true)"
+  if [ -n "$fd_cmd" ]; then
+    dir="$("$fd_cmd" --type d --hidden --exclude .git . "$root" 2>/dev/null | fzf --height 40% --layout=reverse --border --prompt "cd > ")" || return
+  else
+    dir="$(find "$root" -type d -not -path '*/.git/*' 2>/dev/null | fzf --height 40% --layout=reverse --border --prompt "cd > ")" || return
+  fi
+
   [ -n "$dir" ] && cd "$dir" || return
+}
+
+ff() {
+  local root="${1:-.}"
+  local file
+  local fd_cmd
+  local bat_cmd
+  local preview
+
+  command -v fzf >/dev/null 2>&1 || {
+    echo "fzf is missing. Run check-tools, then reinstall dependencies if needed."
+    return 1
+  }
+
+  bat_cmd="$(_shell_tools_bat_command 2>/dev/null || true)"
+  if [ -n "$bat_cmd" ]; then
+    preview="$bat_cmd --style=numbers --color=always --line-range=:200 {} 2>/dev/null"
+  else
+    preview="sed -n '1,200p' {} 2>/dev/null"
+  fi
+
+  fd_cmd="$(_shell_tools_fd_command 2>/dev/null || true)"
+  if [ -n "$fd_cmd" ]; then
+    file="$("$fd_cmd" --type f --hidden --exclude .git . "$root" 2>/dev/null | fzf --height 70% --layout=reverse --border --preview "$preview" --prompt "file > ")" || return
+  elif command -v rg >/dev/null 2>&1; then
+    file="$(rg --files "$root" 2>/dev/null | fzf --height 70% --layout=reverse --border --preview "$preview" --prompt "file > ")" || return
+  else
+    file="$(find "$root" -type f -not -path '*/.git/*' 2>/dev/null | fzf --height 70% --layout=reverse --border --preview "$preview" --prompt "file > ")" || return
+  fi
+
+  [ -n "$file" ] && printf "%s\n" "$file"
+}
+
+fe() {
+  local file
+  local editor
+
+  file="$(ff "${1:-.}")" || return
+  [ -n "$file" ] || return 1
+  editor="$(_shell_tools_editor)"
+  "$editor" "$file"
+}
+
+extract() {
+  local archive="${1:-}"
+
+  [ -n "$archive" ] || {
+    echo "Usage: extract <archive>"
+    return 1
+  }
+  [ -f "$archive" ] || {
+    echo "Archive not found: $archive"
+    return 1
+  }
+
+  case "$archive" in
+    *.tar.bz2|*.tbz2) tar xjf "$archive" ;;
+    *.tar.gz|*.tgz) tar xzf "$archive" ;;
+    *.tar.xz|*.txz) tar xJf "$archive" ;;
+    *.tar) tar xf "$archive" ;;
+    *.zip) unzip "$archive" ;;
+    *.gz) gunzip "$archive" ;;
+    *.bz2) bunzip2 "$archive" ;;
+    *.xz) unxz "$archive" ;;
+    *) echo "Unsupported archive: $archive"; return 1 ;;
+  esac
+}
+
+serve() {
+  local port="${1:-8000}"
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -m http.server "$port"
+  elif command -v python >/dev/null 2>&1; then
+    python -m SimpleHTTPServer "$port"
+  else
+    echo "Python is missing, cannot start a quick file server."
+    return 1
+  fi
+}
+
+ports() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -tulpen
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -tulpen 2>/dev/null || netstat -an
+  else
+    echo "Neither ss nor netstat is available."
+    return 1
+  fi
+}
+
+dps() {
+  if command -v docker >/dev/null 2>&1; then
+    docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+  else
+    echo "Docker is missing. Run check-tools, then install Docker if this VM should use it."
+    return 1
+  fi
+}
+
+duh() {
+  local target="${1:-.}"
+
+  if du -h --max-depth=1 "$target" >/dev/null 2>&1; then
+    du -h --max-depth=1 "$target" | _shell_tools_sort_human
+  else
+    du -hd 1 "$target" 2>/dev/null | _shell_tools_sort_human
+  fi
+}
+
+pathlist() {
+  printf "%s\n" "$PATH" | tr ':' '\n'
+}
+
+sysupdate() {
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get upgrade -y
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf upgrade -y
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -Syu
+  elif command -v apk >/dev/null 2>&1; then
+    sudo apk update && sudo apk upgrade
+  elif command -v brew >/dev/null 2>&1; then
+    brew update && brew upgrade
+  else
+    echo "No supported package manager found."
+    return 1
+  fi
 }
 
 alias-tools-load() {
@@ -1204,7 +1411,7 @@ check-tools() {
   local tool
   local tool_path
 
-  for tool in git ssh curl fzf bash-completion bat eza zoxide jq nc gh docker multipass; do
+  _shell_tools_smart_tool_list | while IFS= read -r tool; do
     tool_path="$(_shell_tools_dependency_path "$tool" 2>/dev/null || true)"
     if [ -n "$tool_path" ]; then
       printf "%-16s %sOK%s %s\n" "$tool" "$ST_GREEN" "$ST_RESET" "$tool_path"
@@ -1212,6 +1419,24 @@ check-tools() {
       printf "%-16s %smissing%s\n" "$tool" "$ST_RED" "$ST_RESET"
     fi
   done
+}
+
+_shell_tools_smart_tool_summary() {
+  local total=0
+  local installed=0
+  local tool
+  local tool_path
+
+  while IFS= read -r tool; do
+    [ -n "$tool" ] || continue
+    total=$((total + 1))
+    tool_path="$(_shell_tools_dependency_path "$tool" 2>/dev/null || true)"
+    [ -n "$tool_path" ] && installed=$((installed + 1))
+  done <<EOF
+$(_shell_tools_smart_tool_list)
+EOF
+
+  printf "%s/%s" "$installed" "$total"
 }
 
 _shell_tools_remove_profile_hook() {
@@ -1264,8 +1489,16 @@ myhelp() {
   printf "cat/catp      Pretty file reading via bat when available\n"
   printf "z/zi          Smart directory jumping via zoxide when available\n"
   printf "cdf           Fuzzy cd into a directory with fzf\n"
+  printf "ff            Fuzzy find a file with preview\n"
+  printf "fe            Fuzzy find a file and open it in editor\n"
   printf "mkcd          Create a directory and cd into it\n"
   printf "please        Re-run the previous command with sudo\n"
+  printf "extract       Extract common archive formats\n"
+  printf "serve         Start a quick HTTP file server\n"
+  printf "ports         Show listening TCP/UDP ports\n"
+  printf "duh           Show first-level disk usage sorted by size\n"
+  printf "pathlist      Print PATH one entry per line\n"
+  printf "sysupdate     Update the VM with the detected package manager\n"
   printf "aa            Save the previous command as an alias\n"
   printf "laa           List aliases\n"
   printf "rma           Remove alias\n"
@@ -1286,6 +1519,7 @@ shell-tools-dashboard() {
   local disk_text
   local host_count
   local shell_name
+  local tool_summary
 
   ip="$(_shell_tools_primary_ip)"
   [ -n "$ip" ] || ip="unknown"
@@ -1293,14 +1527,17 @@ shell-tools-dashboard() {
   disk_text="$(_shell_tools_disk)"
   host_count="$(tail -n +2 "$INFRA_HOSTS_FILE" 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
   shell_name="$(basename "${SHELL:-shell}")"
+  tool_summary="$(_shell_tools_smart_tool_summary)"
 
   printf "\n%s==========================================================%s\n" "$ST_DIM" "$ST_RESET"
   printf "%sENV READY - %s@%s%s\n" "$ST_CYAN" "$(id -un 2>/dev/null || whoami)" "$(hostname -s 2>/dev/null || hostname)" "$ST_RESET"
   printf "%sIP: %s | OS: %s | Shell: %s%s\n" "$ST_MAGENTA" "$ip" "$(uname -s)" "$shell_name" "$ST_RESET"
   printf "%sDisk: %s | Uptime: %s | Infra hosts: %s%s\n" "$ST_CYAN" "$disk_text" "$uptime_text" "$host_count" "$ST_RESET"
+  printf "%sSmart tools: %s | Try: ll, ff, fe, cdf, ports, sysupdate%s\n" "$ST_MAGENTA" "$tool_summary" "$ST_RESET"
   printf "%s==========================================================%s\n" "$ST_DIM" "$ST_RESET"
   printf "init       -> infra dashboard\n"
   printf "sshhosts   -> connect to SSH host\n"
+  printf "ff         -> fuzzy file finder\n"
   printf "infra-add  -> add server\n"
   printf "infra-edit -> modify server\n"
   printf "check-tools-> dependency check\n"
