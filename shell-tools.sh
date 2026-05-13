@@ -193,7 +193,7 @@ _shell_tools_sort_human() {
 _shell_tools_smart_tool_list() {
   printf "%s\n" git ssh curl wget fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim gh docker multipass
   case "$(uname -s 2>/dev/null)" in
-    Linux) _shell_tools_is_control_profile && printf "%s\n" ufw fail2ban ;;
+    Linux) printf "%s\n" ufw fail2ban ;;
   esac
 }
 

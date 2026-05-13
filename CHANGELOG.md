@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4 - 2026-05-13
+
+- Added Linux workstation SSH onboarding with authorized_keys setup, optional password-login disablement, SSH port detection, UFW/fail2ban/MFA hardening, and guarded SSH restart prompts.
+- Kept workstation infra dashboard commands disabled while still allowing local security configuration.
+
 ## 0.1.3 - 2026-05-13
 
 - Added Control node vs Workstation machine profile selection at installer startup.

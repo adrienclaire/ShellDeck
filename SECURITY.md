@@ -13,8 +13,8 @@ ShellDeck changes shell startup files, installs packages, and can optionally con
 Prefer tagged release URLs over `main`:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.3/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.3/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```
@@ -22,8 +22,8 @@ bash install.sh
 On Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.3/install.ps1 -OutFile install.ps1
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.3/checksums.txt -OutFile checksums.txt
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/checksums.txt -OutFile checksums.txt
 Get-FileHash .\install.ps1 -Algorithm SHA256
 .\install.ps1
 ```

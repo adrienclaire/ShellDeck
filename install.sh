@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SHELL_TOOLS_VERSION="${SHELL_TOOLS_VERSION:-0.1.3}"
+SHELL_TOOLS_VERSION="${SHELL_TOOLS_VERSION:-0.1.4}"
 SHELL_ALIAS_TOOLS_REF="${SHELL_ALIAS_TOOLS_REF:-v$SHELL_TOOLS_VERSION}"
 RAW_BASE="${SHELL_ALIAS_TOOLS_RAW_BASE:-https://raw.githubusercontent.com/adrienclaire/ShellDeck/$SHELL_ALIAS_TOOLS_REF}"
 INSTALL_DIR="${SHELL_ALIAS_TOOLS_HOME:-$HOME/.shell-alias-tools}"
@@ -21,7 +21,7 @@ Usage:
   bash install.sh [--yes] [--dry-run] [--profile control|workstation] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
 
 Examples:
-  curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.3/install.sh && bash install.sh
+  curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh && bash install.sh
   bash install.sh --dry-run
 USAGE
 }
@@ -115,7 +115,7 @@ prompt_yes_no() {
   local answer
   local tty="/dev/tty"
 
-  [ -e "$tty" ] || tty=""
+  [ -e "$tty" ] && [ -t 1 ] || tty=""
 
   if [ "$ASSUME_YES" -eq 1 ]; then
     [ "$default" = "yes" ]
@@ -129,12 +129,12 @@ prompt_yes_no() {
   fi
 
   while true; do
-    if [ -n "$tty" ]; then
-      printf "%s [%s]: " "$prompt" "$suffix" > "$tty"
-      IFS= read -r answer < "$tty"
+    answer=""
+    if [ -n "$tty" ] && { printf "%s [%s]: " "$prompt" "$suffix" > "$tty" 2>/dev/null && IFS= read -r answer < "$tty"; }; then
+      :
     else
       printf "%s [%s]: " "$prompt" "$suffix"
-      IFS= read -r answer
+      IFS= read -r answer || answer=""
     fi
     answer="$(printf "%s" "$answer" | tr '[:upper:]' '[:lower:]')"
 
@@ -157,7 +157,7 @@ read_default() {
   local answer
   local tty="/dev/tty"
 
-  [ -e "$tty" ] || tty=""
+  [ -e "$tty" ] && [ -t 1 ] || tty=""
 
   if [ "$ASSUME_YES" -eq 1 ]; then
     printf "%s" "$default"
@@ -165,21 +165,21 @@ read_default() {
   fi
 
   if [ -n "$default" ]; then
-    if [ -n "$tty" ]; then
-      printf "%s [%s]: " "$prompt" "$default" > "$tty"
-      IFS= read -r answer < "$tty"
+    answer=""
+    if [ -n "$tty" ] && { printf "%s [%s]: " "$prompt" "$default" > "$tty" 2>/dev/null && IFS= read -r answer < "$tty"; }; then
+      :
     else
       printf "%s [%s]: " "$prompt" "$default" >&2
-      IFS= read -r answer
+      IFS= read -r answer || answer=""
     fi
     printf "%s" "${answer:-$default}"
   else
-    if [ -n "$tty" ]; then
-      printf "%s: " "$prompt" > "$tty"
-      IFS= read -r answer < "$tty"
+    answer=""
+    if [ -n "$tty" ] && { printf "%s: " "$prompt" > "$tty" 2>/dev/null && IFS= read -r answer < "$tty"; }; then
+      :
     else
       printf "%s: " "$prompt" >&2
-      IFS= read -r answer
+      IFS= read -r answer || answer=""
     fi
     printf "%s" "$answer"
   fi
@@ -795,7 +795,7 @@ install_dependencies() {
   local required_tools="git ssh curl wget fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim"
   local optional_tools="gh docker multipass"
 
-  if [ "$os" = "linux" ] && [ "$machine_profile" = "control" ]; then
+  if [ "$os" = "linux" ]; then
     required_tools="$required_tools ufw fail2ban"
   fi
 
@@ -1087,7 +1087,7 @@ ufw_allow_icmp() {
 }
 
 configure_ufw_firewall() {
-  local ssh_port="22"
+  local ssh_port="${CONFIGURED_SSH_PORT:-22}"
   local ssh_source
   local rule_type
   local port
@@ -1330,6 +1330,136 @@ reload_ssh_service() {
   fi
 }
 
+restart_ssh_service() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would restart ssh/sshd"
+    return
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo_cmd systemctl restart ssh 2>/dev/null || sudo_cmd systemctl restart sshd 2>/dev/null || true
+  else
+    sudo_cmd service ssh restart 2>/dev/null || sudo_cmd service sshd restart 2>/dev/null || true
+  fi
+}
+
+sshd_get_option() {
+  local key="$1"
+  local file="/etc/ssh/sshd_config"
+
+  [ -f "$file" ] || return 1
+  awk -v key="$key" '
+    BEGIN { lkey = tolower(key); value = "" }
+    /^[[:space:]]*#/ { next }
+    {
+      current = tolower($1)
+      if (current == lkey && NF >= 2) value = $2
+    }
+    END {
+      if (value != "") print value
+    }
+  ' "$file"
+}
+
+open_file_in_editor() {
+  local file="$1"
+  local editor="${EDITOR:-nano}"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would open $file in ${editor}"
+    return
+  fi
+
+  if ! command -v "$editor" >/dev/null 2>&1; then
+    editor="vi"
+  fi
+
+  sudo_cmd "$editor" "$file"
+}
+
+prepare_authorized_keys() {
+  local ssh_dir="$HOME/.ssh"
+  local authorized_keys="$ssh_dir/authorized_keys"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would create $authorized_keys and set ~/.ssh to 700 and authorized_keys to 600"
+    return
+  fi
+
+  mkdir -p "$ssh_dir"
+  touch "$authorized_keys"
+  chmod 700 "$ssh_dir"
+  chmod 600 "$authorized_keys"
+  chown "$(id -un):$(id -gn)" "$ssh_dir" "$authorized_keys" 2>/dev/null || true
+}
+
+configure_workstation_ssh_access() {
+  local ssh_port
+
+  if ! prompt_yes_no "Enable SSH access to this workstation?" "no"; then
+    return
+  fi
+
+  enable_ssh_server_linux
+
+  if prompt_yes_no "Do you want to add this workstation to your infra dashboard/control node access?" "yes"; then
+    prepare_authorized_keys
+    printf "\nCopy your control host public key, then paste it into:\n"
+    printf "  %s/.ssh/authorized_keys\n\n" "$HOME"
+    if prompt_yes_no "Open authorized_keys in nano now?" "yes"; then
+      EDITOR=nano open_file_in_editor "$HOME/.ssh/authorized_keys"
+      prepare_authorized_keys
+    else
+      warn "Paste the control host public key into ~/.ssh/authorized_keys before disabling password SSH."
+    fi
+  fi
+
+  info "For maximum security, disable SSH password authentication after key login works."
+  if prompt_yes_no "Disable SSH password authentication now?" "no"; then
+    warn "First open a second session with your SSH key and confirm it works. Do not lock yourself out."
+    if prompt_yes_no "I confirmed SSH key login works; set PasswordAuthentication no" "no"; then
+      sshd_set_option "PasswordAuthentication" "no" || true
+      sshd_set_option "KbdInteractiveAuthentication" "no" || true
+      sshd_set_option "ChallengeResponseAuthentication" "no" || true
+    else
+      warn "Password authentication was left enabled."
+    fi
+  fi
+
+  info "Changing the default SSH port reduces noise from automated scans."
+  if prompt_yes_no "Open sshd_config so you can review or change the SSH port?" "no"; then
+    open_file_in_editor "/etc/ssh/sshd_config"
+  fi
+
+  ssh_port="$(sshd_get_option "Port" 2>/dev/null || true)"
+  ssh_port="${ssh_port:-22}"
+  if valid_port "$ssh_port"; then
+    CONFIGURED_SSH_PORT="$ssh_port"
+    info "Detected SSH port: $CONFIGURED_SSH_PORT"
+  else
+    warn "Could not detect a valid SSH port from sshd_config. Using 22 for firewall prompts."
+    CONFIGURED_SSH_PORT="22"
+  fi
+
+  if prompt_yes_no "Configure UFW/fail2ban/MFA for this workstation?" "yes"; then
+    configure_linux_security "linux"
+  fi
+
+  if validate_sshd_config; then
+    if prompt_yes_no "Restart SSH to apply config?" "no"; then
+      warn "Be cautious: keep a working SSH key session open before restarting SSH."
+      if prompt_yes_no "Are you sure you tested SSH key login and want to restart SSH?" "no"; then
+        restart_ssh_service
+        ok "SSH restarted."
+      else
+        warn "SSH was not restarted. Restart later after testing key access."
+      fi
+    fi
+  else
+    warn "SSH config did not validate. SSH was not restarted."
+  fi
+}
+
 configure_linux_mfa() {
   local manager
   local target
@@ -1543,7 +1673,12 @@ main() {
       configure_local_ssh_server "$os"
       configure_linux_security "$os"
     else
-      info "Workstation profile: skipping inbound SSH server, UFW/fail2ban, MFA, and infra host setup."
+      info "Workstation profile: skipping infra dashboard host setup, but offering local SSH and security hardening."
+      if [ "$os" = "linux" ]; then
+        configure_workstation_ssh_access
+      elif [ "$os" = "macos" ]; then
+        configure_local_ssh_server "$os"
+      fi
     fi
   fi
 

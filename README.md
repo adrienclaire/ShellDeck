@@ -9,29 +9,29 @@ ShellDeck installs a profile runtime that upgrades your terminal startup, keeps 
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.3/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.ps1 -OutFile install.ps1
 .\install.ps1
 ```
 
 ### Linux
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.3/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh
 bash install.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.3/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh
 bash install.sh
 ```
 
 To verify checksums first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.3/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.3/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```
@@ -51,10 +51,10 @@ bash install-macos.sh
 - Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, profile, and smart-tool status.
 - Turns Bash into a smarter daily shell with clean shared history, Bash completion, fzf key bindings, a Starship prompt, modern file listing, pretty file reading, smart directory jumping, fuzzy file picking, archive extraction, port inspection, and safe fallbacks.
 - Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `wget`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `starship`, `ripgrep`, `fd`, `jq`, `yq`, `nc`, `tree`, `unzip`, `zip`, `rsync`, `tmux`, `btop`, `htop`, `duf`, `neovim`, `gh`, `docker`, and `multipass` where supported.
-- On Control node Linux installs, adds VM hardening helpers: `ufw` and `fail2ban`, with optional guided configuration.
+- On Linux installs, adds VM hardening helpers: `ufw` and `fail2ban`, with optional guided configuration.
 - Lets you choose Basic, Complete, or Manual dependency setup at install time.
 - In Control node profile, asks whether to enable inbound SSH, configure Linux security, add SSH hosts, store infra hosts, and track one host with many exposed service ports.
-- In Workstation profile, skips infra dashboard commands, SSH host onboarding, inbound SSH setup, and Linux security prompts.
+- In Workstation profile, skips infra dashboard commands but can still configure inbound SSH, authorized keys, UFW, fail2ban, and MFA for the local workstation.
 
 ## Main Commands
 
@@ -155,7 +155,7 @@ Setup modes:
 
 ```text
 Control node  Smart shell plus infra dashboard, SSH shortcuts, host/service checks.
-Workstation   Smart shell only. No infra dashboard, SSH host onboarding, or inbound SSH setup.
+Workstation   Smart shell plus optional local SSH/security hardening. No infra dashboard commands.
 ```
 
 Dependency modes:
@@ -179,7 +179,7 @@ On apt-based Linux systems, the installer runs `apt-get update`, counts availabl
 
 ## Linux Security Setup
 
-After dependency setup on Linux Control node installs, the installer can guide:
+After dependency setup on Linux installs, the installer can guide:
 
 - UFW firewall defaults: deny incoming, allow outgoing.
 - SSH inbound allow rule, with port `22` as the default or your custom SSH port.
@@ -189,6 +189,8 @@ After dependency setup on Linux Control node installs, the installer can guide:
 - Optional TOTP MFA through PAM for SSH, local console login, or both.
 
 When you run the installer over SSH, UFW enablement defaults to no after warning you about lockout risk. MFA setup uses `google-authenticator` where available and validates `sshd -t` before reloading SSH. It keeps `nullok` by default during rollout so an unenrolled user is not locked out unless you explicitly choose to require MFA immediately. Passkey/PAM U2F setup is not automated yet because it needs per-user hardware key enrollment and mapping.
+
+In Workstation profile, SSH hardening is local to the workstation. The installer can enable SSH, prepare `~/.ssh/authorized_keys`, open it in `nano` so you can paste the control node public key, fix permissions, recommend disabling password SSH login only after key login is tested, optionally open `/etc/ssh/sshd_config`, detect the configured SSH port, add that port to UFW, validate `sshd -t`, and restart SSH only after explicit confirmation.
 
 ## Infra Config
 
