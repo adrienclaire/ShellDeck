@@ -10,6 +10,52 @@ else {
 
 $script:AliasToolsPath = Join-Path $script:ShellToolsRoot "aliases.ps1"
 $script:InfraHostsPath = Join-Path $script:ShellToolsRoot "infra-hosts.csv"
+$script:ShellDeckConfigPath = Join-Path $script:ShellToolsRoot "config"
+
+function ConvertTo-ShellDeckMachineProfile {
+    param([string]$Value)
+
+    switch ($Value.Trim().ToLowerInvariant()) {
+        { $_ -in @("control", "control-node", "controlnode", "management", "manager", "management-host", "management-computer", "admin", "infra") } { return "control" }
+        { $_ -in @("workstation", "desktop", "laptop", "dev", "developer", "personal") } { return "workstation" }
+        default { return "" }
+    }
+}
+
+function Get-ShellDeckMachineProfile {
+    if ($env:SHELLDECK_MACHINE_PROFILE) {
+        $fromEnv = ConvertTo-ShellDeckMachineProfile $env:SHELLDECK_MACHINE_PROFILE
+        if ($fromEnv) {
+            return $fromEnv
+        }
+    }
+
+    if (Test-Path $script:ShellDeckConfigPath) {
+        foreach ($line in Get-Content -Path $script:ShellDeckConfigPath -ErrorAction SilentlyContinue) {
+            if ($line -match '^\s*SHELLDECK_MACHINE_PROFILE\s*=\s*"?([^"\r\n]+)"?\s*$') {
+                $fromConfig = ConvertTo-ShellDeckMachineProfile $matches[1]
+                if ($fromConfig) {
+                    return $fromConfig
+                }
+            }
+        }
+    }
+
+    return "control"
+}
+
+$script:ShellDeckMachineProfile = Get-ShellDeckMachineProfile
+
+function Test-ShellDeckControlProfile {
+    return ($script:ShellDeckMachineProfile -eq "control")
+}
+
+function Get-ShellDeckMachineProfileLabel {
+    if (Test-ShellDeckControlProfile) {
+        return "Control node"
+    }
+    return "Workstation"
+}
 
 function Convert-ShellToolsInfraSchema {
     if (-not (Test-Path $script:InfraHostsPath)) {
@@ -46,6 +92,10 @@ function Ensure-ShellToolsHome {
 
     if (-not (Test-Path $script:AliasToolsPath)) {
         New-Item -ItemType File -Force -Path $script:AliasToolsPath | Out-Null
+    }
+
+    if (-not (Test-ShellDeckControlProfile)) {
+        return
     }
 
     if (-not (Test-Path $script:InfraHostsPath)) {
@@ -373,6 +423,10 @@ function Get-ShellToolsSmartToolList {
 }
 
 function Get-InfraHosts {
+    if (-not (Test-ShellDeckControlProfile)) {
+        return @()
+    }
+
     Ensure-ShellToolsHome
 
     if (-not (Test-Path $script:InfraHostsPath)) {
@@ -658,6 +712,11 @@ function Edit-InfraHost {
 }
 
 function Initialize-ShellTools {
+    if (-not (Test-ShellDeckControlProfile)) {
+        Write-Host "Workstation profile is active. Infra setup is disabled." -ForegroundColor Yellow
+        return
+    }
+
     Write-Host ""
     Write-Host "Shell Alias Tools setup" -ForegroundColor Cyan
 
@@ -802,6 +861,11 @@ function Show-DockerServicesForHost {
 }
 
 function init {
+    if (-not (Test-ShellDeckControlProfile)) {
+        Write-Host "Workstation profile is active. Infra dashboard is disabled." -ForegroundColor Yellow
+        return
+    }
+
     Write-Host ""
     Write-Host "+------------------------------------------------------------+" -ForegroundColor Blue
     Write-Host "| SHELL INFRA DASHBOARD                                      |" -ForegroundColor Blue
@@ -1305,7 +1369,8 @@ function Show-ShellDashboard {
     }
 
     $ip = Get-PrimaryIPv4
-    $hostCount = @(Get-InfraHosts).Count
+    $profileLabel = Get-ShellDeckMachineProfileLabel
+    $hostCount = if (Test-ShellDeckControlProfile) { @(Get-InfraHosts).Count } else { 0 }
     $uptime = Get-ShortUptime
     $disk = Get-ShellToolsDiskSummary
     $toolSummary = Get-ShellToolsSmartToolSummary
@@ -1314,14 +1379,21 @@ function Show-ShellDashboard {
     Write-Host ("=" * 58) -ForegroundColor DarkGray
     Write-Host ("ENV READY - {0}@{1}" -f (whoami), $env:COMPUTERNAME) -ForegroundColor Cyan
     Write-Host ("IP: {0} | Uptime: {1}" -f $ip, $uptime) -ForegroundColor Magenta
-    Write-Host ("Disk: {0} | Infra hosts: {1}" -f $disk, $hostCount) -ForegroundColor DarkCyan
+    if (Test-ShellDeckControlProfile) {
+        Write-Host ("Disk: {0} | Profile: {1} | Infra hosts: {2}" -f $disk, $profileLabel, $hostCount) -ForegroundColor DarkCyan
+    }
+    else {
+        Write-Host ("Disk: {0} | Profile: {1}" -f $disk, $profileLabel) -ForegroundColor DarkCyan
+    }
     Write-Host ("Smart tools: {0} | Try: ll, ff, fe, cdf, ports, sysupdate" -f $toolSummary) -ForegroundColor Magenta
     Write-Host ("=" * 58) -ForegroundColor DarkGray
-    Write-Host "init       -> infra dashboard"
-    Write-Host "sshhosts   -> connect to SSH host"
     Write-Host "ff         -> fuzzy file finder"
-    Write-Host "infra-add  -> add server"
-    Write-Host "infra-edit -> modify server"
+    if (Test-ShellDeckControlProfile) {
+        Write-Host "init       -> infra dashboard"
+        Write-Host "sshhosts   -> connect to SSH host"
+        Write-Host "infra-add  -> add server"
+        Write-Host "infra-edit -> modify server"
+    }
     Write-Host "check-tools-> dependency check"
     Write-Host "myhelp     -> all commands"
     Write-Host ""
@@ -1331,12 +1403,14 @@ function myhelp {
     Write-Host ""
     Write-Host "COMMANDS" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "init          Infra dashboard"
-    Write-Host "shellsetup    Interactive first-run setup"
-    Write-Host "infra-add     Add a server to infra config"
-    Write-Host "infra-edit    Modify an infra server"
-    Write-Host "infra-list    List configured servers"
-    Write-Host "sshhosts      Pick an SSH host and connect"
+    if (Test-ShellDeckControlProfile) {
+        Write-Host "init          Infra dashboard"
+        Write-Host "shellsetup    Interactive first-run setup"
+        Write-Host "infra-add     Add a server to infra config"
+        Write-Host "infra-edit    Modify an infra server"
+        Write-Host "infra-list    List configured servers"
+        Write-Host "sshhosts      Pick an SSH host and connect"
+    }
     Write-Host "check-tools   Check local CLI dependencies"
     Write-Host "shelluninstall Remove profile hook and optional data"
     Write-Host "ll/la/l/lt    Smart listing via eza when available"
@@ -1387,7 +1461,7 @@ function Uninstall-ShellTools {
 
     Remove-ShellToolsProfileHook -ProfilePath $PROFILE
 
-    if (Read-ShellToolsYesNo "Delete $script:ShellToolsRoot including aliases and infra config?" $false) {
+    if (Read-ShellToolsYesNo "Delete $script:ShellToolsRoot including aliases, config, and any infra data?" $false) {
         if (Test-Path $script:ShellToolsRoot) {
             Remove-Item -LiteralPath $script:ShellToolsRoot -Recurse -Force
             Write-Host "Deleted $script:ShellToolsRoot" -ForegroundColor Green
@@ -1468,7 +1542,20 @@ Set-Alias ep Edit-Profile -Scope Global -Force
 Set-Alias reloadp Reload-Profile -Scope Global -Force
 Set-Alias aa add-last-func -Scope Global -Force
 Set-Alias lf list-funcs -Scope Global -Force
-Set-Alias shellsetup Initialize-ShellTools -Scope Global -Force
+if (Test-ShellDeckControlProfile) {
+    Set-Alias shellsetup Initialize-ShellTools -Scope Global -Force
+}
+else {
+    foreach ($infraCommand in @("init", "infra-add", "infra-edit", "infra-list", "sshhosts", "Initialize-ShellTools", "Add-InfraHost", "Edit-InfraHost", "Select-InfraHostName")) {
+        if (Test-Path "Function:$infraCommand") {
+            Remove-Item "Function:$infraCommand" -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if (Test-Path "Alias:shellsetup") {
+        Remove-Item "Alias:shellsetup" -Force -ErrorAction SilentlyContinue
+    }
+}
 Set-Alias myh myhelp -Scope Global -Force
 
 Show-ShellDashboard

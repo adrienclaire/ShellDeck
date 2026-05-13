@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added Control node vs Workstation machine profile selection at installer startup.
+- Workstation profile now skips infra dashboard commands, SSH host onboarding, inbound SSH setup, and Linux security prompts.
+- Added Apache License 2.0 with non-commercial and Commons Clause source-available licensing terms.
+- Documented personal, educational, and commercial-use license boundaries in the README.
+
 ## 0.1.2 - 2026-05-09
 
 - Updated release links and installer defaults for the renamed `adrienclaire/ShellDeck` repository.

@@ -5,6 +5,8 @@ param(
     [switch]$SkipInfra,
     [switch]$DryRun,
     [string]$Mode = "",
+    [Alias("Role")]
+    [string]$MachineProfile = "",
     [string]$InstallDir = $(if ($env:SHELL_ALIAS_TOOLS_HOME) { $env:SHELL_ALIAS_TOOLS_HOME } else { Join-Path $HOME ".shell-alias-tools" })
 )
 
@@ -116,6 +118,48 @@ function Read-InstallMode {
     }
 }
 
+function Normalize-MachineProfile {
+    param([string]$Value)
+
+    switch ($Value.Trim().ToLowerInvariant()) {
+        { $_ -in @("1", "control", "control-node", "controlnode", "management", "manager", "management-host", "management-computer", "admin", "infra") } { return "control" }
+        { $_ -in @("2", "workstation", "desktop", "laptop", "dev", "developer", "personal") } { return "workstation" }
+        default { return "" }
+    }
+}
+
+function Read-MachineProfile {
+    if (-not [string]::IsNullOrWhiteSpace($MachineProfile)) {
+        $normalized = Normalize-MachineProfile $MachineProfile
+        if ($normalized) {
+            return $normalized
+        }
+        Write-Warn "Unknown machine profile '$MachineProfile'. Use control or workstation."
+    }
+
+    if ($Yes) {
+        return "control"
+    }
+
+    Write-Step "Machine profile"
+    Write-Host "  1) Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks"
+    Write-Host "  2) Workstation  - smart shell only, no infra dashboard or SSH host management"
+
+    while ($true) {
+        $choice = Read-Host "Choose machine profile [1]"
+        if ([string]::IsNullOrWhiteSpace($choice)) {
+            $choice = "1"
+        }
+
+        $normalized = Normalize-MachineProfile $choice
+        if ($normalized) {
+            return $normalized
+        }
+
+        Write-Warn "Choose 1 for Control node or 2 for Workstation."
+    }
+}
+
 function Get-InstallToolPath {
     param([string]$Tool)
 
@@ -173,9 +217,28 @@ function Get-InstallToolPath {
     }
 }
 
-function Ensure-InstallFiles {
+function Write-RuntimeConfig {
+    param([Parameter(Mandatory = $true)][string]$SelectedMachineProfile)
+
+    $configPath = Join-Path $InstallDir "config"
     if ($DryRun) {
-        Write-DryRun "would create $InstallDir and install shell-tools.ps1, aliases.ps1, and infra-hosts.csv"
+        Write-DryRun "would write $configPath with SHELLDECK_MACHINE_PROFILE=$SelectedMachineProfile"
+        return
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($configPath, "SHELLDECK_MACHINE_PROFILE=$SelectedMachineProfile`n", $utf8NoBom)
+}
+
+function Ensure-InstallFiles {
+    param([Parameter(Mandatory = $true)][string]$SelectedMachineProfile)
+
+    if ($DryRun) {
+        Write-DryRun "would create $InstallDir and install shell-tools.ps1, aliases.ps1, and profile config"
+        if ($SelectedMachineProfile -eq "control") {
+            Write-DryRun "would create infra-hosts.csv for the control node profile"
+        }
+        Write-RuntimeConfig -SelectedMachineProfile $SelectedMachineProfile
         return (Join-Path $InstallDir "shell-tools.ps1")
     }
 
@@ -199,8 +262,10 @@ function Ensure-InstallFiles {
         New-Item -ItemType File -Force -Path $aliasesPath | Out-Null
     }
 
+    Write-RuntimeConfig -SelectedMachineProfile $SelectedMachineProfile
+
     $hostsPath = Join-Path $InstallDir "infra-hosts.csv"
-    if (-not (Test-Path $hostsPath)) {
+    if ($SelectedMachineProfile -eq "control" -and -not (Test-Path $hostsPath)) {
         "Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services" |
             Set-Content -Path $hostsPath -Encoding UTF8
     }
@@ -431,21 +496,27 @@ function Configure-Infra {
 }
 
 function Main {
-    Write-Step "Installing ShellDeck for Windows..."
+    $selectedMachineProfile = Read-MachineProfile
+    Write-Step "Installing ShellDeck for Windows as $selectedMachineProfile profile..."
     if ($DryRun) {
         Write-Warn "Dry run enabled: no files, packages, profiles, services, or firewall rules will be changed."
     }
 
-    $runtimePath = Ensure-InstallFiles
+    $runtimePath = Ensure-InstallFiles -SelectedMachineProfile $selectedMachineProfile
     Add-ProfileHook -RuntimePath $runtimePath
 
     if (-not $SkipDeps) {
         $setupMode = Read-InstallMode
         Install-Dependencies -SetupMode $setupMode
-        Enable-LocalSshServer
+        if ($selectedMachineProfile -eq "control") {
+            Enable-LocalSshServer
+        }
+        else {
+            Write-Step "Workstation profile: skipping inbound SSH server and infra host setup."
+        }
     }
 
-    if (-not $SkipInfra) {
+    if ($selectedMachineProfile -eq "control" -and -not $SkipInfra) {
         Configure-Infra -RuntimePath $runtimePath
     }
 
@@ -461,11 +532,14 @@ function Main {
     Write-Host ". '$runtimePath'"
     Write-Host ""
     Write-Host "Then try:" -ForegroundColor Cyan
-    Write-Host "init"
     Write-Host "ll"
     Write-Host "ff"
-    Write-Host "sshhosts"
     Write-Host "check-tools"
+    if ($selectedMachineProfile -eq "control") {
+        Write-Host "init"
+        Write-Host "sshhosts"
+        Write-Host "infra-add"
+    }
 }
 
 Main

@@ -1,8 +1,8 @@
 # ShellDeck
 
-Cross-platform smart shell bootstrap and infra dashboard for fresh VMs, workstations, and homelab nodes.
+Cross-platform smart shell bootstrap for fresh VMs, workstations, and homelab control nodes.
 
-ShellDeck installs a profile runtime that turns your terminal startup into a small infra dashboard, keeps personal aliases/functions in one place, and helps onboard SSH hosts such as Proxmox, Docker VMs, and app servers.
+ShellDeck installs a profile runtime that upgrades your terminal startup, keeps personal aliases/functions in one place, and can optionally turn a control node into an infra dashboard for SSH hosts such as Proxmox, Docker VMs, and app servers.
 
 ## One-command install
 
@@ -47,19 +47,18 @@ bash install-macos.sh
 
 - Installs the shell runtime into `~/.shell-alias-tools`.
 - Hooks the runtime into your PowerShell, Bash, or Zsh profile.
-- Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, and infra host count.
+- Lets you choose a machine profile first: Control node for infra management, or Workstation for smart shell only.
+- Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, profile, and smart-tool status.
 - Turns Bash into a smarter daily shell with clean shared history, Bash completion, fzf key bindings, a Starship prompt, modern file listing, pretty file reading, smart directory jumping, fuzzy file picking, archive extraction, port inspection, and safe fallbacks.
 - Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `wget`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `starship`, `ripgrep`, `fd`, `jq`, `yq`, `nc`, `tree`, `unzip`, `zip`, `rsync`, `tmux`, `btop`, `htop`, `duf`, `neovim`, `gh`, `docker`, and `multipass` where supported.
-- On Linux, adds VM hardening helpers: `ufw` and `fail2ban`, with optional guided configuration.
+- On Control node Linux installs, adds VM hardening helpers: `ufw` and `fail2ban`, with optional guided configuration.
 - Lets you choose Basic, Complete, or Manual dependency setup at install time.
-- Asks whether to enable inbound SSH on the new VM or machine.
-- Asks whether to generate an ed25519 SSH key.
-- Shows the public key and tells you how to copy it to the remote host.
-- Adds SSH hosts to `~/.ssh/config`.
-- Stores infra hosts in `~/.shell-alias-tools/infra-hosts.csv`.
-- Tracks one host with many exposed service ports.
+- In Control node profile, asks whether to enable inbound SSH, configure Linux security, add SSH hosts, store infra hosts, and track one host with many exposed service ports.
+- In Workstation profile, skips infra dashboard commands, SSH host onboarding, inbound SSH setup, and Linux security prompts.
 
 ## Main Commands
+
+Control node commands:
 
 ```text
 init          Infra dashboard and live host checks
@@ -68,6 +67,11 @@ infra-add     Add a server to infra config
 infra-edit    Modify an existing server
 infra-list    List configured servers
 sshhosts      Pick an SSH host and connect
+```
+
+Available in both profiles:
+
+```text
 check-tools   Check local CLI dependencies
 shelluninstall Remove profile hook and optionally delete local data
 myhelp        Show all commands
@@ -115,7 +119,7 @@ It sources `bash-completion` when installed, loads fzf key bindings and completi
 
 The target VM tool belt is intentionally broad but still Bash-compatible: file navigation (`eza`, `zoxide`, `fd`, `ripgrep`, `fzf`), prompt/theme (`starship`), file reading/editing (`bat`, `neovim`), JSON/YAML (`jq`, `yq`), ops visibility (`btop`, `htop`, `duf`, `ports`), remote/dev basics (`ssh`, `rsync`, `tmux`, `gh`), and infra extras (`docker`, `multipass`) when you accept them.
 
-The Windows PowerShell installer mirrors the same neutral infra setup and smart tool checklist through `winget` where a reliable native package exists. Defaults are generic: `server1`, `admin`, port `22`, and an IPv4 prompt example like `192.168.1.X`.
+The Windows PowerShell installer mirrors the same profile choice and smart tool checklist through `winget` where a reliable native package exists. Control node defaults are generic: `server1`, `admin`, port `22`, and an IPv4 prompt example like `192.168.1.X`.
 
 ## Install Options
 
@@ -124,6 +128,8 @@ Windows:
 ```powershell
 .\install.ps1 -Yes
 .\install.ps1 -DryRun
+.\install.ps1 -MachineProfile control
+.\install.ps1 -MachineProfile workstation
 .\install.ps1 -Mode basic
 .\install.ps1 -Mode complete
 .\install.ps1 -Mode manual
@@ -136,6 +142,8 @@ Linux/macOS:
 ```bash
 bash install.sh --yes
 bash install.sh --dry-run
+bash install.sh --profile control
+bash install.sh --profile workstation
 bash install.sh --mode basic
 bash install.sh --mode complete
 bash install.sh --mode manual
@@ -144,6 +152,13 @@ bash install.sh --skip-infra
 ```
 
 Setup modes:
+
+```text
+Control node  Smart shell plus infra dashboard, SSH shortcuts, host/service checks.
+Workstation   Smart shell only. No infra dashboard, SSH host onboarding, or inbound SSH setup.
+```
+
+Dependency modes:
 
 ```text
 Basic    Install required smart-shell dependencies automatically.
@@ -164,7 +179,7 @@ On apt-based Linux systems, the installer runs `apt-get update`, counts availabl
 
 ## Linux Security Setup
 
-After dependency setup on Linux, the installer can guide:
+After dependency setup on Linux Control node installs, the installer can guide:
 
 - UFW firewall defaults: deny incoming, allow outgoing.
 - SSH inbound allow rule, with port `22` as the default or your custom SSH port.
@@ -176,6 +191,8 @@ After dependency setup on Linux, the installer can guide:
 When you run the installer over SSH, UFW enablement defaults to no after warning you about lockout risk. MFA setup uses `google-authenticator` where available and validates `sshd -t` before reloading SSH. It keeps `nullok` by default during rollout so an unenrolled user is not locked out unless you explicitly choose to require MFA immediately. Passkey/PAM U2F setup is not automated yet because it needs per-user hardware key enrollment and mapping.
 
 ## Infra Config
+
+Infra config is enabled only in the Control node profile.
 
 The host setup flow is:
 
@@ -218,11 +235,20 @@ Docker and Multipass are heavier desktop tools on macOS. Complete mode installs 
 - Release installs should use tagged URLs and checksum verification.
 - `SECURITY.md` documents risky features, Linux hardening behavior, and vulnerability reporting.
 
+## License
+
+ShellDeck is source-available under the Apache License 2.0 with an additional non-commercial use restriction and the Commons Clause License Condition v1.0.
+
+This project is free for personal and educational use only. Commercial use, resale, sublicensing, paid hosting, offering ShellDeck as a service, or redistribution for profit requires explicit written authorization.
+
+See the `LICENSE` file for details.
+
 ## Files
 
 ```text
 VERSION            Current release version
 CHANGELOG.md       Release notes
+LICENSE            Source-available license terms
 SECURITY.md        Security policy and safe install guidance
 checksums.txt      SHA256 checksums for release artifacts
 install.ps1        Windows installer

@@ -11,13 +11,14 @@ SKIP_INFRA=0
 DRY_RUN=0
 OS_OVERRIDE=""
 INSTALL_MODE=""
+MACHINE_PROFILE=""
 
 usage() {
   cat <<'USAGE'
 ShellDeck installer for Linux and macOS.
 
 Usage:
-  bash install.sh [--yes] [--dry-run] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
+  bash install.sh [--yes] [--dry-run] [--profile control|workstation] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
 
 Examples:
   curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.2/install.sh && bash install.sh
@@ -47,6 +48,15 @@ while [ $# -gt 0 ]; do
         exit 1
       fi
       INSTALL_MODE="${1:-}"
+      ;;
+    --profile|--role)
+      shift
+      if [ $# -eq 0 ]; then
+        echo "Missing value for --profile" >&2
+        usage
+        exit 1
+      fi
+      MACHINE_PROFILE="${1:-}"
       ;;
     --os)
       shift
@@ -267,6 +277,53 @@ normalize_install_mode() {
   esac
 }
 
+normalize_machine_profile() {
+  case "$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')" in
+    1|control|control-node|controlnode|management|manager|management-host|management-computer|admin|infra)
+      printf "control"
+      ;;
+    2|workstation|desktop|laptop|dev|developer|personal)
+      printf "workstation"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+choose_machine_profile() {
+  local choice
+  local normalized
+
+  if [ -n "$MACHINE_PROFILE" ]; then
+    normalized="$(normalize_machine_profile "$MACHINE_PROFILE" 2>/dev/null || true)"
+    if [ -n "$normalized" ]; then
+      printf "%s" "$normalized"
+      return
+    fi
+    warn "Unknown machine profile '$MACHINE_PROFILE'. Use control or workstation." >&2
+  fi
+
+  if [ "$ASSUME_YES" -eq 1 ]; then
+    printf "control"
+    return
+  fi
+
+  info "Machine profile" >&2
+  printf "  1) Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks\n" >&2
+  printf "  2) Workstation  - smart shell only, no infra dashboard or SSH host management\n" >&2
+
+  while true; do
+    choice="$(read_default "Choose machine profile" "1")"
+    normalized="$(normalize_machine_profile "$choice" 2>/dev/null || true)"
+    if [ -n "$normalized" ]; then
+      printf "%s" "$normalized"
+      return
+    fi
+    warn "Choose 1 for Control node or 2 for Workstation." >&2
+  done
+}
+
 choose_install_mode() {
   local choice
   local normalized
@@ -344,12 +401,29 @@ download_file() {
   fi
 }
 
+write_runtime_config() {
+  local machine_profile="$1"
+  local config_file="$INSTALL_DIR/config"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would write $config_file with SHELLDECK_MACHINE_PROFILE=$machine_profile"
+    return
+  fi
+
+  printf "SHELLDECK_MACHINE_PROFILE=%s\n" "$machine_profile" > "$config_file"
+}
+
 copy_runtime() {
+  local machine_profile="$1"
   local script_path
   local script_dir
 
   if [ "$DRY_RUN" -eq 1 ]; then
-    dry_run "would create $INSTALL_DIR and install shell-tools.sh, aliases.sh, and infra-hosts.csv"
+    dry_run "would create $INSTALL_DIR and install shell-tools.sh, aliases.sh, and profile config"
+    if [ "$machine_profile" = "control" ]; then
+      dry_run "would create infra-hosts.csv for the control node profile"
+    fi
+    write_runtime_config "$machine_profile"
     return
   fi
 
@@ -366,7 +440,8 @@ copy_runtime() {
 
   chmod 644 "$INSTALL_DIR/shell-tools.sh"
   [ -f "$INSTALL_DIR/aliases.sh" ] || : > "$INSTALL_DIR/aliases.sh"
-  if [ ! -f "$INSTALL_DIR/infra-hosts.csv" ]; then
+  write_runtime_config "$machine_profile"
+  if [ "$machine_profile" = "control" ] && [ ! -f "$INSTALL_DIR/infra-hosts.csv" ]; then
     printf "Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services\n" > "$INSTALL_DIR/infra-hosts.csv"
   fi
 }
@@ -710,6 +785,7 @@ dependency_path() {
 install_dependencies() {
   local os="$1"
   local mode="$2"
+  local machine_profile="${3:-control}"
   local manager=""
   local tool
   local default
@@ -719,7 +795,7 @@ install_dependencies() {
   local required_tools="git ssh curl wget fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim"
   local optional_tools="gh docker multipass"
 
-  if [ "$os" = "linux" ]; then
+  if [ "$os" = "linux" ] && [ "$machine_profile" = "control" ]; then
     required_tools="$required_tools ufw fail2ban"
   fi
 
@@ -1441,17 +1517,19 @@ configure_infra() {
 
 main() {
   local os
+  local machine_profile
   local profile
   local profile_list
   local mode="basic"
 
   os="$(detect_os)"
-  info "Installing ShellDeck for $os..."
+  machine_profile="$(choose_machine_profile)"
+  info "Installing ShellDeck for $os as $machine_profile profile..."
   if [ "$DRY_RUN" -eq 1 ]; then
     warn "Dry run enabled: no files, packages, profiles, firewall rules, services, or PAM files will be changed."
   fi
 
-  copy_runtime
+  copy_runtime "$machine_profile"
 
   profile_list="$(profile_candidates "$os")"
   printf "%s\n" "$profile_list" | while IFS= read -r profile; do
@@ -1460,14 +1538,18 @@ main() {
 
   if [ "$SKIP_DEPS" -eq 0 ]; then
     mode="$(choose_install_mode)"
-    install_dependencies "$os" "$mode"
-    configure_local_ssh_server "$os"
-    configure_linux_security "$os"
+    install_dependencies "$os" "$mode" "$machine_profile"
+    if [ "$machine_profile" = "control" ]; then
+      configure_local_ssh_server "$os"
+      configure_linux_security "$os"
+    else
+      info "Workstation profile: skipping inbound SSH server, UFW/fail2ban, MFA, and infra host setup."
+    fi
   fi
 
-  if [ "$SKIP_INFRA" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
+  if [ "$machine_profile" = "control" ] && [ "$SKIP_INFRA" -eq 0 ] && [ "$DRY_RUN" -eq 0 ]; then
     configure_infra
-  elif [ "$SKIP_INFRA" -eq 0 ]; then
+  elif [ "$machine_profile" = "control" ] && [ "$SKIP_INFRA" -eq 0 ]; then
     dry_run "would load the runtime and offer interactive infra host setup"
   fi
 
@@ -1483,11 +1565,14 @@ main() {
   printf "If that profile file is not the one your shell uses, load the runtime directly:\n"
   printf "  source \"%s/shell-tools.sh\"\n" "$INSTALL_DIR"
   printf "\nThen try:\n"
-  printf "  init\n"
   printf "  ll\n"
   printf "  ff\n"
-  printf "  sshhosts\n"
   printf "  check-tools\n"
+  if [ "$machine_profile" = "control" ]; then
+    printf "  init\n"
+    printf "  sshhosts\n"
+    printf "  infra-add\n"
+  fi
 }
 
 main

@@ -6,4 +6,5 @@
 *.md text eol=lf
 *.yml text eol=lf
 VERSION text eol=lf
+LICENSE text eol=lf
 checksums.txt text eol=lf

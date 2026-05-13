@@ -5,6 +5,56 @@
 export SHELL_ALIAS_TOOLS_HOME="${SHELL_ALIAS_TOOLS_HOME:-$HOME/.shell-alias-tools}"
 export ALIAS_TOOLS_FILE="${ALIAS_TOOLS_FILE:-$SHELL_ALIAS_TOOLS_HOME/aliases.sh}"
 export INFRA_HOSTS_FILE="${INFRA_HOSTS_FILE:-$SHELL_ALIAS_TOOLS_HOME/infra-hosts.csv}"
+export SHELLDECK_CONFIG_FILE="${SHELLDECK_CONFIG_FILE:-$SHELL_ALIAS_TOOLS_HOME/config}"
+
+_shell_tools_normalize_machine_profile() {
+  case "$(printf "%s" "$1" | tr '[:upper:]' '[:lower:]')" in
+    control|control-node|controlnode|management|manager|management-host|management-computer|admin|infra)
+      printf "control"
+      ;;
+    workstation|desktop|laptop|dev|developer|personal)
+      printf "workstation"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+_shell_tools_load_machine_profile() {
+  local configured
+  local key
+  local value
+
+  if [ -f "$SHELLDECK_CONFIG_FILE" ]; then
+    while IFS='=' read -r key value; do
+      [ "$key" = "SHELLDECK_MACHINE_PROFILE" ] || continue
+      value="$(printf "%s" "$value" | tr -d '\r"')"
+      _shell_tools_normalize_machine_profile "$value" 2>/dev/null && return 0
+    done < "$SHELLDECK_CONFIG_FILE"
+  fi
+
+  configured="${SHELLDECK_MACHINE_PROFILE:-}"
+  if [ -n "$configured" ]; then
+    _shell_tools_normalize_machine_profile "$configured" 2>/dev/null && return 0
+  fi
+
+  printf "control"
+}
+
+SHELLDECK_MACHINE_PROFILE="$(_shell_tools_load_machine_profile)"
+
+_shell_tools_is_control_profile() {
+  [ "$SHELLDECK_MACHINE_PROFILE" = "control" ]
+}
+
+_shell_tools_machine_profile_label() {
+  if _shell_tools_is_control_profile; then
+    printf "Control node"
+  else
+    printf "Workstation"
+  fi
+}
 
 _shell_tools_has_tty() {
   [ -t 1 ]
@@ -33,8 +83,10 @@ else
 fi
 
 shell-tools-ensure-home() {
-  mkdir -p "$SHELL_ALIAS_TOOLS_HOME" "$HOME/.ssh" 2>/dev/null || true
+  mkdir -p "$SHELL_ALIAS_TOOLS_HOME" 2>/dev/null || true
+  _shell_tools_is_control_profile && mkdir -p "$HOME/.ssh" 2>/dev/null || true
   [ -f "$ALIAS_TOOLS_FILE" ] || : > "$ALIAS_TOOLS_FILE"
+  _shell_tools_is_control_profile || return 0
   if [ ! -f "$INFRA_HOSTS_FILE" ]; then
     printf "Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services\n" > "$INFRA_HOSTS_FILE"
   elif head -n 1 "$INFRA_HOSTS_FILE" 2>/dev/null | grep -q '^Name,HostName,User,Port,Role,CheckPorts,Url,SshEnabled$'; then
@@ -141,7 +193,7 @@ _shell_tools_sort_human() {
 _shell_tools_smart_tool_list() {
   printf "%s\n" git ssh curl wget fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim gh docker multipass
   case "$(uname -s 2>/dev/null)" in
-    Linux) printf "%s\n" ufw fail2ban ;;
+    Linux) _shell_tools_is_control_profile && printf "%s\n" ufw fail2ban ;;
   esac
 }
 
@@ -1522,7 +1574,7 @@ shelluninstall() {
   _shell_tools_remove_profile_hook "$HOME/.zshrc"
   _shell_tools_remove_profile_hook "$HOME/.profile"
 
-  if _shell_tools_yes_no "Delete $SHELL_ALIAS_TOOLS_HOME including aliases and infra config?" "no"; then
+  if _shell_tools_yes_no "Delete $SHELL_ALIAS_TOOLS_HOME including aliases, config, and any infra data?" "no"; then
     rm -rf "$SHELL_ALIAS_TOOLS_HOME"
     printf "%sDeleted:%s %s\n" "$ST_GREEN" "$ST_RESET" "$SHELL_ALIAS_TOOLS_HOME"
   else
@@ -1534,12 +1586,14 @@ shelluninstall() {
 
 myhelp() {
   printf "\n%sCOMMANDS%s\n\n" "$ST_CYAN" "$ST_RESET"
-  printf "init          Infra dashboard\n"
-  printf "shellsetup    Interactive first-run setup\n"
-  printf "infra-add     Add a server to infra config\n"
-  printf "infra-edit    Modify an infra server\n"
-  printf "infra-list    List configured servers\n"
-  printf "sshhosts      Pick an SSH host and connect\n"
+  if _shell_tools_is_control_profile; then
+    printf "init          Infra dashboard\n"
+    printf "shellsetup    Interactive first-run setup\n"
+    printf "infra-add     Add a server to infra config\n"
+    printf "infra-edit    Modify an infra server\n"
+    printf "infra-list    List configured servers\n"
+    printf "sshhosts      Pick an SSH host and connect\n"
+  fi
   printf "check-tools   Check local CLI dependencies\n"
   printf "shelluninstall Remove profile hook and optional data\n"
   printf "ll/la/l/lt    Smart listing via eza when available\n"
@@ -1578,28 +1632,44 @@ shell-tools-dashboard() {
   local host_count
   local shell_name
   local tool_summary
+  local profile_label
 
   ip="$(_shell_tools_primary_ip)"
   [ -n "$ip" ] || ip="unknown"
   uptime_text="$(_shell_tools_uptime)"
   disk_text="$(_shell_tools_disk)"
-  host_count="$(tail -n +2 "$INFRA_HOSTS_FILE" 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+  host_count="0"
+  if _shell_tools_is_control_profile; then
+    host_count="$(tail -n +2 "$INFRA_HOSTS_FILE" 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+  fi
   shell_name="$(basename "${SHELL:-shell}")"
   tool_summary="$(_shell_tools_smart_tool_summary)"
+  profile_label="$(_shell_tools_machine_profile_label)"
 
   printf "\n%s==========================================================%s\n" "$ST_DIM" "$ST_RESET"
   printf "%sENV READY - %s@%s%s\n" "$ST_CYAN" "$(id -un 2>/dev/null || whoami)" "$(hostname -s 2>/dev/null || hostname)" "$ST_RESET"
   printf "%sIP: %s | OS: %s | Shell: %s%s\n" "$ST_MAGENTA" "$ip" "$(uname -s)" "$shell_name" "$ST_RESET"
-  printf "%sDisk: %s | Uptime: %s | Infra hosts: %s%s\n" "$ST_CYAN" "$disk_text" "$uptime_text" "$host_count" "$ST_RESET"
+  if _shell_tools_is_control_profile; then
+    printf "%sDisk: %s | Uptime: %s | Profile: %s | Infra hosts: %s%s\n" "$ST_CYAN" "$disk_text" "$uptime_text" "$profile_label" "$host_count" "$ST_RESET"
+  else
+    printf "%sDisk: %s | Uptime: %s | Profile: %s%s\n" "$ST_CYAN" "$disk_text" "$uptime_text" "$profile_label" "$ST_RESET"
+  fi
   printf "%sSmart tools: %s | Try: ll, ff, fe, cdf, ports, sysupdate%s\n" "$ST_MAGENTA" "$tool_summary" "$ST_RESET"
   printf "%s==========================================================%s\n" "$ST_DIM" "$ST_RESET"
-  printf "init       -> infra dashboard\n"
-  printf "sshhosts   -> connect to SSH host\n"
   printf "ff         -> fuzzy file finder\n"
-  printf "infra-add  -> add server\n"
-  printf "infra-edit -> modify server\n"
+  if _shell_tools_is_control_profile; then
+    printf "init       -> infra dashboard\n"
+    printf "sshhosts   -> connect to SSH host\n"
+    printf "infra-add  -> add server\n"
+    printf "infra-edit -> modify server\n"
+  fi
   printf "check-tools-> dependency check\n"
   printf "myhelp     -> all commands\n\n"
+}
+
+_shell_tools_disable_infra_commands_for_workstation() {
+  _shell_tools_is_control_profile && return 0
+  unset -f shellsetup init infra-add infra-edit infra-list sshhosts 2>/dev/null || true
 }
 
 alias aa='add-alias-last'
@@ -1607,6 +1677,7 @@ alias laa='list-alias'
 alias rma='rm-alias'
 
 alias-tools-load
+_shell_tools_disable_infra_commands_for_workstation
 
 case "$-" in
   *i*)
