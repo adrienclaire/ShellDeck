@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 - 2026-05-13
 
 - Added Control node vs Workstation machine profile selection at installer startup.
 - Workstation profile now skips infra dashboard commands, SSH host onboarding, inbound SSH setup, and Linux security prompts.
