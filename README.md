@@ -184,7 +184,7 @@ gum       Prefer Gum and try to install it when missing.
 classic   Use portable text prompts only.
 ```
 
-The Gum UI is optional. When available, the installer uses styled sections plus interactive choices, confirmations, and inputs. If Gum is missing or the script is running non-interactively, ShellDeck falls back to classic prompts.
+The Gum UI is optional. When available, the installer uses styled sections plus interactive choices, confirmations, and inputs. If Gum is missing, ShellDeck can install it first. A downloaded installer re-launches itself with Gum after installation; `curl | bash` cannot reliably re-exec the consumed stream, so it refreshes PATH and continues with Gum when available. If Gum is unavailable or the script is non-interactive, ShellDeck falls back to classic prompts.
 
 ## Safety Defaults
 

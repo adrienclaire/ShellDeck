@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ORIGINAL_ARGS=("$@")
 SHELL_TOOLS_VERSION="${SHELL_TOOLS_VERSION:-0.1.4}"
 SHELL_ALIAS_TOOLS_REF="${SHELL_ALIAS_TOOLS_REF:-v$SHELL_TOOLS_VERSION}"
 RAW_BASE="${SHELL_ALIAS_TOOLS_RAW_BASE:-https://raw.githubusercontent.com/adrienclaire/ShellDeck/$SHELL_ALIAS_TOOLS_REF}"
@@ -104,6 +105,41 @@ ui_can_prompt() {
 
 ui_gum() {
   [ "$SHELLDECK_USE_GUM" -eq 1 ] && command -v gum >/dev/null 2>&1 && ui_can_prompt
+}
+
+refresh_gum_path() {
+  local dir
+
+  for dir in \
+    "$HOME/.local/bin" \
+    "$HOME/bin" \
+    /opt/homebrew/bin \
+    /usr/local/bin \
+    /snap/bin; do
+    [ -d "$dir" ] || continue
+    case ":$PATH:" in
+      *":$dir:"*) ;;
+      *) PATH="$dir:$PATH" ;;
+    esac
+  done
+  export PATH
+}
+
+reexec_with_gum_if_possible() {
+  local script_path
+
+  [ "${SHELLDECK_GUM_REEXECED:-0}" = "1" ] && return 1
+  ui_can_prompt || return 1
+  command -v gum >/dev/null 2>&1 || return 1
+
+  script_path="${BASH_SOURCE[0]:-$0}"
+  [ -f "$script_path" ] && [ -r "$script_path" ] || return 1
+  case "$script_path" in
+    /dev/fd/*|/proc/*/fd/*|-) return 1 ;;
+  esac
+
+  info "Relaunching installer with Gum UI..."
+  exec env SHELLDECK_GUM_REEXECED=1 bash "$script_path" "${ORIGINAL_ARGS[@]}" --ui gum
 }
 
 color() {
@@ -902,11 +938,11 @@ bootstrap_gum_ui() {
     return
   fi
 
-  ui_can_prompt || return
-  [ "$ASSUME_YES" -eq 0 ] || return
+  ui_can_prompt || return 0
+  [ "$ASSUME_YES" -eq 0 ] || return 0
 
   if [ "$INSTALL_UI" = "auto" ] && ! prompt_yes_no "Install Gum now for a richer installer interface?" "yes"; then
-    return
+    return 0
   fi
 
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -928,8 +964,10 @@ bootstrap_gum_ui() {
       ;;
   esac
 
+  refresh_gum_path
   if command -v gum >/dev/null 2>&1; then
     SHELLDECK_USE_GUM=1
+    reexec_with_gum_if_possible || true
   else
     warn "Gum is not available after install attempt. Continuing with the classic installer UI."
   fi

@@ -27,6 +27,21 @@ if ($ClassicUi) { $Ui = "classic" }
 if ($GumUi) { $Ui = "gum" }
 $script:UseGum = $false
 
+function Update-GumPath {
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"),
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"),
+        (Join-Path $HOME ".local\bin"),
+        (Join-Path $HOME "bin")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    foreach ($candidate in $candidates) {
+        if ((";{0};" -f $env:PATH) -notlike "*;$candidate;*") {
+            $env:PATH = "$candidate;$env:PATH"
+        }
+    }
+}
+
 function Test-GumUi {
     return ($script:UseGum -and (Get-Command gum -ErrorAction SilentlyContinue))
 }
@@ -556,6 +571,52 @@ function Configure-Infra {
     }
 }
 
+function Get-InstallerReinvokeArguments {
+    $arguments = @()
+
+    if ($Yes) { $arguments += "-Yes" }
+    if ($SkipDeps) { $arguments += "-SkipDeps" }
+    if ($SkipInfra) { $arguments += "-SkipInfra" }
+    if ($DryRun) { $arguments += "-DryRun" }
+    if (-not [string]::IsNullOrWhiteSpace($Mode)) {
+        $arguments += "-Mode"
+        $arguments += $Mode
+    }
+    if (-not [string]::IsNullOrWhiteSpace($MachineProfile)) {
+        $arguments += "-MachineProfile"
+        $arguments += $MachineProfile
+    }
+    if (-not [string]::IsNullOrWhiteSpace($InstallDir)) {
+        $arguments += "-InstallDir"
+        $arguments += $InstallDir
+    }
+
+    $arguments += "-Ui"
+    $arguments += "gum"
+    return $arguments
+}
+
+function Restart-InstallerWithGumIfPossible {
+    if ($env:SHELLDECK_GUM_REEXECED -eq "1") {
+        return
+    }
+
+    Update-GumPath
+    if (-not (Get-Command gum -ErrorAction SilentlyContinue)) {
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($PSCommandPath) -or -not (Test-Path $PSCommandPath)) {
+        return
+    }
+
+    Write-Step "Relaunching installer with Gum UI..."
+    $env:SHELLDECK_GUM_REEXECED = "1"
+    $arguments = Get-InstallerReinvokeArguments
+    & $PSCommandPath @arguments
+    exit $LASTEXITCODE
+}
+
 function Initialize-InstallerUi {
     $normalizedUi = $Ui.Trim().ToLowerInvariant()
 
@@ -569,6 +630,7 @@ function Initialize-InstallerUi {
         $normalizedUi = "auto"
     }
 
+    Update-GumPath
     if (Get-Command gum -ErrorAction SilentlyContinue) {
         $script:UseGum = $true
         return
@@ -599,8 +661,10 @@ function Initialize-InstallerUi {
         Write-Warn "Gum install failed. Continuing with the classic installer UI."
     }
 
+    Update-GumPath
     if (Get-Command gum -ErrorAction SilentlyContinue) {
         $script:UseGum = $true
+        Restart-InstallerWithGumIfPossible
     }
     else {
         Write-Warn "Gum is not available after install attempt. Continuing with the classic installer UI."
