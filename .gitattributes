@@ -4,7 +4,9 @@
 *.sh text eol=lf
 *.ps1 text eol=lf
 *.md text eol=lf
+*.html text eol=lf
 *.yml text eol=lf
+*.png binary
 VERSION text eol=lf
 LICENSE text eol=lf
 checksums.txt text eol=lf

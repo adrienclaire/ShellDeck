@@ -4,6 +4,14 @@ Cross-platform smart shell bootstrap for fresh VMs, workstations, and homelab co
 
 ShellDeck installs a profile runtime that upgrades your terminal startup, keeps personal aliases/functions in one place, and can optionally turn a control node into an infra dashboard for SSH hosts such as Proxmox, Docker VMs, and app servers.
 
+## Screenshots
+
+![ShellDeck Gum installer profile selection](docs/screenshots/shelldeck-installer-profile.png)
+
+![ShellDeck workstation SSH hardening flow](docs/screenshots/shelldeck-workstation-hardening.png)
+
+![ShellDeck infra dashboard](docs/screenshots/shelldeck-infra-dashboard.png)
+
 ## One-command install
 
 ### Windows PowerShell
@@ -276,4 +284,5 @@ install-macos.sh   macOS wrapper
 alias-tools.ps1    PowerShell runtime
 shell-tools.sh     Bash/Zsh runtime
 alias-tools.md     Original Bash alias-tool example
+docs/screenshots   Browser-rendered README screenshots
 ```
