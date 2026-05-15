@@ -7,6 +7,9 @@ param(
     [string]$Mode = "",
     [Alias("Role")]
     [string]$MachineProfile = "",
+    [string]$Ui = $(if ($env:SHELLDECK_INSTALL_UI) { $env:SHELLDECK_INSTALL_UI } else { "auto" }),
+    [switch]$ClassicUi,
+    [switch]$GumUi,
     [string]$InstallDir = $(if ($env:SHELL_ALIAS_TOOLS_HOME) { $env:SHELL_ALIAS_TOOLS_HOME } else { Join-Path $HOME ".shell-alias-tools" })
 )
 
@@ -20,19 +23,42 @@ else {
     "https://raw.githubusercontent.com/adrienclaire/ShellDeck/$ShellAliasToolsRef"
 }
 
+if ($ClassicUi) { $Ui = "classic" }
+if ($GumUi) { $Ui = "gum" }
+$script:UseGum = $false
+
+function Test-GumUi {
+    return ($script:UseGum -and (Get-Command gum -ErrorAction SilentlyContinue))
+}
+
 function Write-Step {
     param([string]$Message)
-    Write-Host $Message -ForegroundColor Cyan
+    if (Test-GumUi) {
+        & gum style --foreground 39 --bold $Message
+    }
+    else {
+        Write-Host $Message -ForegroundColor Cyan
+    }
 }
 
 function Write-Ok {
     param([string]$Message)
-    Write-Host $Message -ForegroundColor Green
+    if (Test-GumUi) {
+        & gum style --foreground 42 --bold $Message
+    }
+    else {
+        Write-Host $Message -ForegroundColor Green
+    }
 }
 
 function Write-Warn {
     param([string]$Message)
-    Write-Host $Message -ForegroundColor Yellow
+    if (Test-GumUi) {
+        & gum style --foreground 214 --bold $Message
+    }
+    else {
+        Write-Host $Message -ForegroundColor Yellow
+    }
 }
 
 function Write-DryRun {
@@ -54,6 +80,12 @@ function Confirm-InstallChoice {
         return $Default
     }
 
+    if (Test-GumUi) {
+        $gumDefault = if ($Default) { "true" } else { "false" }
+        & gum confirm "--default=$gumDefault" $Prompt
+        return ($LASTEXITCODE -eq 0)
+    }
+
     $suffix = if ($Default) { "Y/n" } else { "y/N" }
     while ($true) {
         $answer = (Read-Host "$Prompt [$suffix]").Trim().ToLowerInvariant()
@@ -71,6 +103,16 @@ function Confirm-InstallChoice {
             "non" { return $false }
             default { Write-Warn "Please answer yes or no." }
         }
+    }
+}
+
+function Show-InstallerBanner {
+    if (Test-GumUi) {
+        "ShellDeck`nSmart shell bootstrap and infra-aware installer`n`nProfile-aware setup for control nodes and workstations." |
+            gum style --border rounded --border-foreground 39 --padding "1 2" --margin "1 0" --foreground 255 --bold
+    }
+    else {
+        Write-Step "ShellDeck installer"
     }
 }
 
@@ -96,6 +138,16 @@ function Read-InstallMode {
 
     if ($Yes) {
         return "basic"
+    }
+
+    if (Test-GumUi) {
+        $choice = & gum choose --header "Choose dependency setup mode" --height 8 `
+            "Basic - install required smart-shell dependencies automatically" `
+            "Complete - required dependencies plus Docker, Multipass, and GitHub CLI" `
+            "Manual - ask before installing every dependency"
+        if ($choice -like "Basic*") { return "basic" }
+        if ($choice -like "Complete*") { return "complete" }
+        if ($choice -like "Manual*") { return "manual" }
     }
 
     Write-Step "Setup mode"
@@ -139,6 +191,14 @@ function Read-MachineProfile {
 
     if ($Yes) {
         return "control"
+    }
+
+    if (Test-GumUi) {
+        $choice = & gum choose --header "Choose machine profile" --height 6 `
+            "Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks" `
+            "Workstation - smart shell plus optional local SSH/security hardening"
+        if ($choice -like "Control*") { return "control" }
+        if ($choice -like "Workstation*") { return "workstation" }
     }
 
     Write-Step "Machine profile"
@@ -318,6 +378,7 @@ function Install-WindowsDependency {
     $wingetPackages = @{
         git       = "Git.Git"
         wget      = "GNU.Wget2"
+        gum       = "Charmbracelet.gum"
         fzf       = "junegunn.fzf"
         bat       = "sharkdp.bat"
         eza       = "eza-community.eza"
@@ -389,7 +450,7 @@ function Install-Dependencies {
     param([string]$SetupMode)
 
     $requiredTools = @(
-        "git", "ssh", "curl", "wget", "fzf", "bash-completion", "bat", "eza", "zoxide",
+        "git", "ssh", "curl", "wget", "gum", "fzf", "bash-completion", "bat", "eza", "zoxide",
         "starship", "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
         "btop", "htop", "duf", "neovim"
     )
@@ -495,7 +556,60 @@ function Configure-Infra {
     }
 }
 
+function Initialize-InstallerUi {
+    $normalizedUi = $Ui.Trim().ToLowerInvariant()
+
+    if ($normalizedUi -in @("classic", "none", "off")) {
+        $script:UseGum = $false
+        return
+    }
+
+    if ($normalizedUi -notin @("auto", "gum")) {
+        Write-Warn "Unknown -Ui value '$Ui'. Use auto, gum, or classic."
+        $normalizedUi = "auto"
+    }
+
+    if (Get-Command gum -ErrorAction SilentlyContinue) {
+        $script:UseGum = $true
+        return
+    }
+
+    if ($Yes) {
+        return
+    }
+
+    if ($normalizedUi -eq "auto" -and -not (Confirm-InstallChoice "Install Gum now for a richer installer interface?" $true)) {
+        return
+    }
+
+    if ($DryRun) {
+        Write-DryRun "would install gum with winget for the rich installer UI"
+        return
+    }
+
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Warn "winget is not available. Continuing with the classic installer UI."
+        return
+    }
+
+    try {
+        winget install --id Charmbracelet.gum -e --accept-package-agreements --accept-source-agreements | Out-Host
+    }
+    catch {
+        Write-Warn "Gum install failed. Continuing with the classic installer UI."
+    }
+
+    if (Get-Command gum -ErrorAction SilentlyContinue) {
+        $script:UseGum = $true
+    }
+    else {
+        Write-Warn "Gum is not available after install attempt. Continuing with the classic installer UI."
+    }
+}
+
 function Main {
+    Initialize-InstallerUi
+    Show-InstallerBanner
     $selectedMachineProfile = Read-MachineProfile
     Write-Step "Installing ShellDeck for Windows as $selectedMachineProfile profile..."
     if ($DryRun) {

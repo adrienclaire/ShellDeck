@@ -50,7 +50,7 @@ bash install-macos.sh
 - Lets you choose a machine profile first: Control node for infra management, or Workstation for smart shell only.
 - Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, profile, and smart-tool status.
 - Turns Bash into a smarter daily shell with clean shared history, Bash completion, fzf key bindings, a Starship prompt, modern file listing, pretty file reading, smart directory jumping, fuzzy file picking, archive extraction, port inspection, and safe fallbacks.
-- Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `wget`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `starship`, `ripgrep`, `fd`, `jq`, `yq`, `nc`, `tree`, `unzip`, `zip`, `rsync`, `tmux`, `btop`, `htop`, `duf`, `neovim`, `gh`, `docker`, and `multipass` where supported.
+- Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `wget`, `gum`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `starship`, `ripgrep`, `fd`, `jq`, `yq`, `nc`, `tree`, `unzip`, `zip`, `rsync`, `tmux`, `btop`, `htop`, `duf`, `neovim`, `gh`, `docker`, and `multipass` where supported.
 - On Linux installs, adds VM hardening helpers: `ufw` and `fail2ban`, with optional guided configuration.
 - Lets you choose Basic, Complete, or Manual dependency setup at install time.
 - In Control node profile, asks whether to enable inbound SSH, configure Linux security, add SSH hosts, store infra hosts, and track one host with many exposed service ports.
@@ -128,6 +128,9 @@ Windows:
 ```powershell
 .\install.ps1 -Yes
 .\install.ps1 -DryRun
+.\install.ps1 -Ui auto
+.\install.ps1 -GumUi
+.\install.ps1 -ClassicUi
 .\install.ps1 -MachineProfile control
 .\install.ps1 -MachineProfile workstation
 .\install.ps1 -Mode basic
@@ -142,6 +145,9 @@ Linux/macOS:
 ```bash
 bash install.sh --yes
 bash install.sh --dry-run
+bash install.sh --ui auto
+bash install.sh --gum-ui
+bash install.sh --classic-ui
 bash install.sh --profile control
 bash install.sh --profile workstation
 bash install.sh --mode basic
@@ -169,6 +175,16 @@ Manual   Ask before installing each dependency.
 On apt-based Linux systems, the installer runs `apt-get update`, counts available upgrades, and asks before running `apt-get upgrade -y`.
 
 `--dry-run` / `-DryRun` previews file writes, package installs, profile hooks, SSH setup, and Linux security actions without changing the system.
+
+Installer UI:
+
+```text
+auto      Use Gum when available and offer to install it interactively.
+gum       Prefer Gum and try to install it when missing.
+classic   Use portable text prompts only.
+```
+
+The Gum UI is optional. When available, the installer uses styled sections plus interactive choices, confirmations, and inputs. If Gum is missing or the script is running non-interactively, ShellDeck falls back to classic prompts.
 
 ## Safety Defaults
 

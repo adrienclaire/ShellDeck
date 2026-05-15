@@ -12,17 +12,20 @@ DRY_RUN=0
 OS_OVERRIDE=""
 INSTALL_MODE=""
 MACHINE_PROFILE=""
+INSTALL_UI="${SHELLDECK_INSTALL_UI:-auto}"
+SHELLDECK_USE_GUM=0
 
 usage() {
   cat <<'USAGE'
 ShellDeck installer for Linux and macOS.
 
 Usage:
-  bash install.sh [--yes] [--dry-run] [--profile control|workstation] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
+  bash install.sh [--yes] [--dry-run] [--ui auto|gum|classic] [--profile control|workstation] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
 
 Examples:
   curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh && bash install.sh
   bash install.sh --dry-run
+  bash install.sh --ui gum
 USAGE
 }
 
@@ -58,6 +61,21 @@ while [ $# -gt 0 ]; do
       fi
       MACHINE_PROFILE="${1:-}"
       ;;
+    --ui)
+      shift
+      if [ $# -eq 0 ]; then
+        echo "Missing value for --ui" >&2
+        usage
+        exit 1
+      fi
+      INSTALL_UI="${1:-}"
+      ;;
+    --classic-ui)
+      INSTALL_UI="classic"
+      ;;
+    --gum-ui)
+      INSTALL_UI="gum"
+      ;;
     --os)
       shift
       if [ $# -eq 0 ]; then
@@ -80,6 +98,14 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+ui_can_prompt() {
+  [ "$ASSUME_YES" -eq 0 ] && [ -t 1 ] && [ -e /dev/tty ]
+}
+
+ui_gum() {
+  [ "$SHELLDECK_USE_GUM" -eq 1 ] && command -v gum >/dev/null 2>&1 && ui_can_prompt
+}
+
 color() {
   local code="$1"
   shift
@@ -91,21 +117,93 @@ color() {
 }
 
 info() {
-  color "36" "$*"
+  if ui_gum; then
+    gum style --foreground 39 --bold "$*" || color "36" "$*"
+  else
+    color "36" "$*"
+  fi
 }
 
 ok() {
-  color "32" "$*"
+  if ui_gum; then
+    gum style --foreground 42 --bold "$*" || color "32" "$*"
+  else
+    color "32" "$*"
+  fi
 }
 
 warn() {
-  color "33" "$*" >&2
+  if ui_gum; then
+    gum style --foreground 214 --bold "$*" >&2 || color "33" "$*" >&2
+  else
+    color "33" "$*" >&2
+  fi
 }
 
 dry_run() {
   if [ "$DRY_RUN" -eq 1 ]; then
     color "35" "[dry-run] $*" >&2
   fi
+}
+
+ui_banner() {
+  if ui_gum; then
+    printf "ShellDeck\nSmart shell bootstrap and infra-aware installer\n\nProfile-aware setup for control nodes and workstations." |
+      gum style --border rounded --border-foreground 39 --padding "1 2" --margin "1 0" --foreground 255 --bold
+  else
+    info "ShellDeck installer"
+  fi
+}
+
+ui_section() {
+  local title="$1"
+
+  if ui_gum; then
+    gum style --foreground 205 --bold --margin "1 0 0 0" "$title" || info "$title"
+  else
+    info "$title"
+  fi
+}
+
+ui_confirm() {
+  local prompt="$1"
+  local default="${2:-yes}"
+  local gum_default="true"
+
+  ui_gum || return 2
+  [ "$default" = "yes" ] || gum_default="false"
+
+  if gum confirm --default="$gum_default" "$prompt" < /dev/tty; then
+    return 0
+  fi
+
+  return 1
+}
+
+ui_input() {
+  local prompt="$1"
+  local default="${2:-}"
+  local value
+
+  ui_gum || return 2
+
+  if [ -n "$default" ]; then
+    value="$(gum input --prompt "$prompt: " --value "$default" < /dev/tty)" || return 2
+  else
+    value="$(gum input --prompt "$prompt: " < /dev/tty)" || return 2
+  fi
+
+  printf "%s" "$value"
+}
+
+ui_choose() {
+  local prompt="$1"
+  shift
+  local selected
+
+  ui_gum || return 2
+  selected="$(gum choose --header "$prompt" --height 8 "$@" < /dev/tty)" || return 2
+  printf "%s" "$selected"
 }
 
 prompt_yes_no() {
@@ -120,6 +218,12 @@ prompt_yes_no() {
   if [ "$ASSUME_YES" -eq 1 ]; then
     [ "$default" = "yes" ]
     return
+  fi
+
+  if ui_confirm "$prompt" "$default"; then
+    return 0
+  elif [ "$?" -eq 1 ]; then
+    return 1
   fi
 
   if [ "$default" = "yes" ]; then
@@ -161,6 +265,15 @@ read_default() {
 
   if [ "$ASSUME_YES" -eq 1 ]; then
     printf "%s" "$default"
+    return
+  fi
+
+  if value="$(ui_input "$prompt" "$default")"; then
+    if [ -n "$value" ]; then
+      printf "%s" "$value"
+    else
+      printf "%s" "$default"
+    fi
     return
   fi
 
@@ -309,9 +422,18 @@ choose_machine_profile() {
     return
   fi
 
+  if choice="$(ui_choose "Choose machine profile" \
+    "Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks" \
+    "Workstation - smart shell plus optional local SSH/security hardening")"; then
+    case "$choice" in
+      Control*) printf "control"; return ;;
+      Workstation*) printf "workstation"; return ;;
+    esac
+  fi
+
   info "Machine profile" >&2
   printf "  1) Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks\n" >&2
-  printf "  2) Workstation  - smart shell only, no infra dashboard or SSH host management\n" >&2
+  printf "  2) Workstation  - smart shell plus optional local SSH/security hardening\n" >&2
 
   while true; do
     choice="$(read_default "Choose machine profile" "1")"
@@ -340,6 +462,17 @@ choose_install_mode() {
   if [ "$ASSUME_YES" -eq 1 ]; then
     printf "basic"
     return
+  fi
+
+  if choice="$(ui_choose "Choose dependency setup mode" \
+    "Basic - install required smart-shell dependencies automatically" \
+    "Complete - required dependencies plus Docker, Multipass, and GitHub CLI" \
+    "Manual - ask before installing every dependency")"; then
+    case "$choice" in
+      Basic*) printf "basic"; return ;;
+      Complete*) printf "complete"; return ;;
+      Manual*) printf "manual"; return ;;
+    esac
   fi
 
   info "Setup mode" >&2
@@ -534,6 +667,7 @@ linux_package_for_tool() {
     apt:htop) printf "htop" ;;
     apt:duf) printf "duf" ;;
     apt:neovim) printf "neovim" ;;
+    apt:gum) printf "gum" ;;
     apt:ufw) printf "ufw" ;;
     apt:fail2ban) printf "fail2ban" ;;
     apt:google-authenticator) printf "libpam-google-authenticator" ;;
@@ -564,6 +698,7 @@ linux_package_for_tool() {
     dnf:htop) printf "htop" ;;
     dnf:duf) printf "duf" ;;
     dnf:neovim) printf "neovim" ;;
+    dnf:gum) printf "gum" ;;
     dnf:ufw) printf "ufw" ;;
     dnf:fail2ban) printf "fail2ban" ;;
     dnf:google-authenticator) printf "google-authenticator" ;;
@@ -594,6 +729,7 @@ linux_package_for_tool() {
     pacman:htop) printf "htop" ;;
     pacman:duf) printf "duf" ;;
     pacman:neovim) printf "neovim" ;;
+    pacman:gum) printf "gum" ;;
     pacman:ufw) printf "ufw" ;;
     pacman:fail2ban) printf "fail2ban" ;;
     pacman:google-authenticator) printf "libpam-google-authenticator" ;;
@@ -624,6 +760,7 @@ linux_package_for_tool() {
     apk:htop) printf "htop" ;;
     apk:duf) printf "duf" ;;
     apk:neovim) printf "neovim" ;;
+    apk:gum) printf "gum" ;;
     apk:ufw) printf "ufw" ;;
     apk:fail2ban) printf "fail2ban" ;;
     apk:google-authenticator) printf "" ;;
@@ -743,6 +880,61 @@ install_macos_dependency() {
   esac
 }
 
+bootstrap_gum_ui() {
+  local os="$1"
+  local manager=""
+
+  case "$(printf "%s" "$INSTALL_UI" | tr '[:upper:]' '[:lower:]')" in
+    classic|none|off)
+      SHELLDECK_USE_GUM=0
+      return
+      ;;
+    auto|gum)
+      ;;
+    *)
+      warn "Unknown --ui value '$INSTALL_UI'. Use auto, gum, or classic."
+      INSTALL_UI="auto"
+      ;;
+  esac
+
+  if command -v gum >/dev/null 2>&1 && ui_can_prompt; then
+    SHELLDECK_USE_GUM=1
+    return
+  fi
+
+  ui_can_prompt || return
+  [ "$ASSUME_YES" -eq 0 ] || return
+
+  if [ "$INSTALL_UI" = "auto" ] && ! prompt_yes_no "Install Gum now for a richer installer interface?" "yes"; then
+    return
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would install gum for the rich installer UI"
+    return
+  fi
+
+  case "$os" in
+    linux)
+      manager="$(detect_linux_package_manager)"
+      if [ -z "$manager" ]; then
+        warn "No supported Linux package manager found for Gum. Continuing with the classic installer UI."
+        return
+      fi
+      install_linux_dependency "gum" "$manager" || true
+      ;;
+    macos)
+      install_macos_dependency "gum" "yes" || true
+      ;;
+  esac
+
+  if command -v gum >/dev/null 2>&1; then
+    SHELLDECK_USE_GUM=1
+  else
+    warn "Gum is not available after install attempt. Continuing with the classic installer UI."
+  fi
+}
+
 dependency_path() {
   local tool="$1"
   local candidate
@@ -792,7 +984,7 @@ install_dependencies() {
   local status
   local install_label
   local command_path
-  local required_tools="git ssh curl wget fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim"
+  local required_tools="git ssh curl wget gum fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim"
   local optional_tools="gh docker multipass"
 
   if [ "$os" = "linux" ]; then
@@ -806,7 +998,7 @@ install_dependencies() {
     fi
   fi
 
-  info "Dependency setup"
+  ui_section "Dependency setup"
   case "$mode" in
     basic)
       info "Basic mode: installing required smart-shell dependencies automatically."
@@ -1534,7 +1726,7 @@ configure_linux_security() {
 
   [ "$os" = "linux" ] || return
 
-  info "Linux security setup"
+  ui_section "Linux security setup"
   configure_ufw_firewall
   configure_fail2ban
   configure_linux_mfa
@@ -1653,6 +1845,8 @@ main() {
   local mode="basic"
 
   os="$(detect_os)"
+  bootstrap_gum_ui "$os"
+  ui_banner
   machine_profile="$(choose_machine_profile)"
   info "Installing ShellDeck for $os as $machine_profile profile..."
   if [ "$DRY_RUN" -eq 1 ]; then

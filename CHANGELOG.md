@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added optional Gum-powered installer UI for richer choices, confirmations, inputs, and styled installer sections.
+- Added `--ui auto|gum|classic`, `--gum-ui`, and `--classic-ui` for Bash/macOS/Linux installs, plus `-Ui`, `-GumUi`, and `-ClassicUi` for PowerShell.
+
 ## 0.1.4 - 2026-05-13
 
 - Added Linux workstation SSH onboarding with authorized_keys setup, optional password-login disablement, SSH port detection, UFW/fail2ban/MFA hardening, and guarded SSH restart prompts.
