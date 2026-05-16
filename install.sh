@@ -106,7 +106,7 @@ while [ $# -gt 0 ]; do
 done
 
 ui_can_prompt() {
-  [ "$ASSUME_YES" -eq 0 ] && [ -t 1 ] && [ -e /dev/tty ]
+  [ "$ASSUME_YES" -eq 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]
 }
 
 ui_gum() {

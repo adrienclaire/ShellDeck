@@ -24,6 +24,8 @@ jobs:
           bash -n install-linux.sh
           bash -n install-macos.sh
           bash -n shell-tools.sh
+      - name: Run Bash regression tests
+        run: bash tests/test-installer-ui.sh
 
   shellcheck:
     name: ShellCheck advisory
