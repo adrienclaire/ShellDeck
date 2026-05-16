@@ -156,7 +156,8 @@ function Read-InstallMode {
     }
 
     if (Test-GumUi) {
-        $choice = & gum choose --header "Choose dependency setup mode" --height 8 `
+        & gum style --foreground 205 --bold "Choose dependency setup mode" | Out-Host
+        $choice = & gum choose --height 8 `
             "Basic - install required smart-shell dependencies automatically" `
             "Complete - required dependencies plus Docker, Multipass, and GitHub CLI" `
             "Manual - ask before installing every dependency"
@@ -209,7 +210,8 @@ function Read-MachineProfile {
     }
 
     if (Test-GumUi) {
-        $choice = & gum choose --header "Choose machine profile" --height 6 `
+        & gum style --foreground 205 --bold "Choose machine profile" | Out-Host
+        $choice = & gum choose --height 6 `
             "Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks" `
             "Workstation - smart shell plus optional local SSH/security hardening"
         if ($choice -like "Control*") { return "control" }

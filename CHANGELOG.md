@@ -6,6 +6,7 @@
 - Added `--ui auto|gum|classic`, `--gum-ui`, and `--classic-ui` for Bash/macOS/Linux installs, plus `-Ui`, `-GumUi`, and `-ClassicUi` for PowerShell.
 - Added Gum bootstrap relaunch behavior for downloaded installers, with PATH refresh and same-process fallback for streamed installs.
 - Added Charmbracelet's official apt repository fallback when `apt-get install gum` cannot locate the package.
+- Fixed Gum choice prompts on older Gum builds by avoiding the incompatible `--header` flag.
 
 ## 0.1.4 - 2026-05-13
 

@@ -238,7 +238,8 @@ ui_choose() {
   local selected
 
   ui_gum || return 2
-  selected="$(gum choose --header "$prompt" --height 8 "$@" < /dev/tty)" || return 2
+  gum style --foreground 205 --bold "$prompt" > /dev/tty 2>/dev/null || printf "%s\n" "$prompt" > /dev/tty
+  selected="$(gum choose --height 8 "$@" < /dev/tty)" || return 2
   printf "%s" "$selected"
 }
 
