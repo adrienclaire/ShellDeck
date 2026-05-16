@@ -10,6 +10,7 @@
 - Fixed Gum choice prompts on older Gum builds by avoiding the incompatible `--header` flag.
 - Fixed early machine profile and setup mode prompts falling back to numbered input when a Gum build does not support `gum choose --height`.
 - Fixed Gum detection inside captured selection prompts by checking `/dev/tty` instead of stdout.
+- Fixed leaked terminal cursor-position responses before Gum choice prompts by avoiding `gum style` immediately before `gum choose`.
 
 ## 0.1.4 - 2026-05-13
 

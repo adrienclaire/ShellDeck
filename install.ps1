@@ -165,17 +165,11 @@ function Read-InstallMode {
     }
 
     if (Test-GumUi) {
-        & gum style --foreground 205 --bold "Choose dependency setup mode" | Out-Host
-        $choice = & gum choose --height 8 `
+        Write-Host "Choose dependency setup mode" -ForegroundColor Magenta
+        $choice = & gum choose `
             "Basic - install required smart-shell dependencies automatically" `
             "Complete - required dependencies plus Docker, Multipass, and GitHub CLI" `
             "Manual - ask before installing every dependency"
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($choice)) {
-            $choice = & gum choose `
-                "Basic - install required smart-shell dependencies automatically" `
-                "Complete - required dependencies plus Docker, Multipass, and GitHub CLI" `
-                "Manual - ask before installing every dependency"
-        }
         if ($choice -like "Basic*") { return "basic" }
         if ($choice -like "Complete*") { return "complete" }
         if ($choice -like "Manual*") { return "manual" }
@@ -225,15 +219,10 @@ function Read-MachineProfile {
     }
 
     if (Test-GumUi) {
-        & gum style --foreground 205 --bold "Choose machine profile" | Out-Host
-        $choice = & gum choose --height 6 `
+        Write-Host "Choose machine profile" -ForegroundColor Magenta
+        $choice = & gum choose `
             "Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks" `
             "Workstation - smart shell plus optional local SSH/security hardening"
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($choice)) {
-            $choice = & gum choose `
-                "Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks" `
-                "Workstation - smart shell plus optional local SSH/security hardening"
-        }
         if ($choice -like "Control*") { return "control" }
         if ($choice -like "Workstation*") { return "workstation" }
     }
