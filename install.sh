@@ -564,6 +564,24 @@ sudo_cmd() {
   fi
 }
 
+run_interactive_command() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would run interactive command: $*"
+    return 0
+  fi
+
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    warn "A real terminal is required for: $*"
+    return 1
+  fi
+
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@" < /dev/tty > /dev/tty 2> /dev/tty
+  else
+    sudo "$@" < /dev/tty > /dev/tty 2> /dev/tty
+  fi
+}
+
 download_file() {
   local url="$1"
   local target="$2"
@@ -1650,7 +1668,7 @@ open_file_in_editor() {
     editor="vi"
   fi
 
-  sudo_cmd "$editor" "$file"
+  run_interactive_command "$editor" "$file"
 }
 
 prepare_authorized_keys() {

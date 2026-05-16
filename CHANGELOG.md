@@ -11,6 +11,8 @@
 - Fixed early machine profile and setup mode prompts falling back to numbered input when a Gum build does not support `gum choose --height`.
 - Fixed Gum detection inside captured selection prompts by checking `/dev/tty` instead of stdout.
 - Fixed leaked terminal cursor-position responses before Gum choice prompts by avoiding `gum style` immediately before `gum choose`.
+- Fixed editor launches during workstation SSH onboarding so `nano` receives `/dev/tty` when the installer is run through `curl | bash`.
+- Added a pseudo-terminal workstation onboarding integration test that covers the authorized_keys editor flow.
 
 ## 0.1.4 - 2026-05-13
 
