@@ -840,6 +840,35 @@ apt_update_and_offer_upgrade() {
   fi
 }
 
+install_gum_from_charm_apt() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would add Charmbracelet apt repository and install gum"
+    return 0
+  fi
+
+  command -v curl >/dev/null 2>&1 || {
+    warn "curl is required to add the Charmbracelet apt repository for Gum."
+    return 1
+  }
+
+  if ! command -v gpg >/dev/null 2>&1; then
+    sudo_cmd apt-get update
+    sudo_cmd apt-get install -y gnupg
+  fi
+
+  sudo_cmd mkdir -p /etc/apt/keyrings
+  if [ ! -f /etc/apt/keyrings/charm.gpg ]; then
+    curl -fsSL https://repo.charm.sh/apt/gpg.key |
+      sudo_cmd gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+  fi
+
+  printf "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *\n" |
+    sudo_cmd tee /etc/apt/sources.list.d/charm.list >/dev/null
+
+  sudo_cmd apt-get update
+  sudo_cmd apt-get install -y gum
+}
+
 install_linux_dependency() {
   local tool="$1"
   local manager="$2"
@@ -881,7 +910,16 @@ install_linux_dependency() {
   fi
 
   case "$manager" in
-    apt) sudo_cmd apt-get install -y "$package" ;;
+    apt)
+      if ! sudo_cmd apt-get install -y "$package"; then
+        if [ "$tool" = "gum" ]; then
+          warn "Gum is not available from the default apt repositories. Adding the official Charmbracelet apt repository."
+          install_gum_from_charm_apt
+        else
+          return 1
+        fi
+      fi
+      ;;
     dnf) sudo_cmd dnf install -y "$package" ;;
     pacman) sudo_cmd pacman -Sy --needed --noconfirm "$package" ;;
     apk) sudo_cmd apk add --no-cache "$package" ;;
