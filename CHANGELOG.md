@@ -8,6 +8,7 @@
 - Added Charmbracelet's official apt repository fallback when `apt-get install gum` cannot locate the package.
 - Added ShellDeck logo assets, a terminal wordmark banner, and refreshed README screenshots for a more polished project presentation.
 - Fixed Gum choice prompts on older Gum builds by avoiding the incompatible `--header` flag.
+- Fixed early machine profile and setup mode prompts falling back to numbered input when a Gum build does not support `gum choose --height`.
 
 ## 0.1.4 - 2026-05-13
 

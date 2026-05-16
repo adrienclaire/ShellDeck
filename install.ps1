@@ -170,6 +170,12 @@ function Read-InstallMode {
             "Basic - install required smart-shell dependencies automatically" `
             "Complete - required dependencies plus Docker, Multipass, and GitHub CLI" `
             "Manual - ask before installing every dependency"
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($choice)) {
+            $choice = & gum choose `
+                "Basic - install required smart-shell dependencies automatically" `
+                "Complete - required dependencies plus Docker, Multipass, and GitHub CLI" `
+                "Manual - ask before installing every dependency"
+        }
         if ($choice -like "Basic*") { return "basic" }
         if ($choice -like "Complete*") { return "complete" }
         if ($choice -like "Manual*") { return "manual" }
@@ -223,6 +229,11 @@ function Read-MachineProfile {
         $choice = & gum choose --height 6 `
             "Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks" `
             "Workstation - smart shell plus optional local SSH/security hardening"
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($choice)) {
+            $choice = & gum choose `
+                "Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks" `
+                "Workstation - smart shell plus optional local SSH/security hardening"
+        }
         if ($choice -like "Control*") { return "control" }
         if ($choice -like "Workstation*") { return "workstation" }
     }
