@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="docs/assets/shelldeck-logo.svg" alt="ShellDeck - smart shell bootstrap for workstations and control nodes" width="760">
+</p>
+
 # ShellDeck
 
-Cross-platform smart shell bootstrap for fresh VMs, workstations, and homelab control nodes.
+ShellDeck is a cross-platform smart shell bootstrap for fresh VMs, workstations, and homelab control nodes.
 
 ShellDeck installs a profile runtime that upgrades your terminal startup, keeps personal aliases/functions in one place, and can optionally turn a control node into an infra dashboard for SSH hosts such as Proxmox, Docker VMs, and app servers.
 

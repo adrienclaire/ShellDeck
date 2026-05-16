@@ -1647,7 +1647,7 @@ shell-tools-dashboard() {
   profile_label="$(_shell_tools_machine_profile_label)"
 
   printf "\n%s==========================================================%s\n" "$ST_DIM" "$ST_RESET"
-  printf "%sENV READY - %s@%s%s\n" "$ST_CYAN" "$(id -un 2>/dev/null || whoami)" "$(hostname -s 2>/dev/null || hostname)" "$ST_RESET"
+  printf "%sShellDeck ready - %s@%s%s\n" "$ST_CYAN" "$(id -un 2>/dev/null || whoami)" "$(hostname -s 2>/dev/null || hostname)" "$ST_RESET"
   printf "%sIP: %s | OS: %s | Shell: %s%s\n" "$ST_MAGENTA" "$ip" "$(uname -s)" "$shell_name" "$ST_RESET"
   if _shell_tools_is_control_profile; then
     printf "%sDisk: %s | Uptime: %s | Profile: %s | Infra hosts: %s%s\n" "$ST_CYAN" "$disk_text" "$uptime_text" "$profile_label" "$host_count" "$ST_RESET"

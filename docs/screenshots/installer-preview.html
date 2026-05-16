@@ -128,6 +128,14 @@
       margin-bottom: 4px;
     }
 
+    .ascii-logo {
+      color: var(--cyan);
+      font-size: 13px;
+      line-height: 1.12;
+      margin: 0 0 14px;
+      white-space: pre;
+    }
+
     .subtle {
       color: var(--muted);
     }
@@ -256,9 +264,13 @@
         </div>
         <div class="terminal">
           <div class="banner">
-            <span class="brand">ShellDeck</span>
-            <span>Smart shell bootstrap and infra-aware installer</span><br>
-            <span class="subtle">Profile-aware setup for control nodes and workstations.</span>
+            <pre class="ascii-logo">   _____ __         ____     ____            __
+  / ___// /_  ___  / / /____/ / /__  _____  / /__
+  \__ \/ __ \/ _ \/ / / ___/ / / _ \/ ___/ / //_/
+ ___/ / / / /  __/ / / /__/ / /  __/ /__  / ,&lt;
+/____/_/ /_/\___/_/_/\___/_/_/\___/\___/ /_/|_|  v0.1.4</pre>
+            <span>Smart shell bootstrap for workstations and control nodes</span><br>
+            <span class="subtle">Infra-aware setup. Hardened defaults. Fast terminal workflows.</span>
           </div>
           <div class="prompt">Choose machine profile</div>
           <div class="choice active">› Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks</div>
@@ -338,7 +350,7 @@
         </div>
         <div class="terminal">
           <div class="banner">
-            <span class="brand">ENV READY - adrien@control-node</span>
+            <span class="brand">ShellDeck ready - admin@control-node</span>
             <span class="magenta">IP: 192.168.1.20 | OS: Linux | Shell: bash</span><br>
             <span class="cyan">Disk: 38G free | Uptime: 6h 14m | Profile: Control node | Infra hosts: 3</span><br>
             <span class="magenta">Smart tools: 28/31 | Try: ll, ff, fe, cdf, ports, sysupdate</span>

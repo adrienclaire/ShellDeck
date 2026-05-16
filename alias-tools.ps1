@@ -1377,7 +1377,7 @@ function Show-ShellDashboard {
 
     Write-Host ""
     Write-Host ("=" * 58) -ForegroundColor DarkGray
-    Write-Host ("ENV READY - {0}@{1}" -f (whoami), $env:COMPUTERNAME) -ForegroundColor Cyan
+    Write-Host ("ShellDeck ready - {0}@{1}" -f (whoami), $env:COMPUTERNAME) -ForegroundColor Cyan
     Write-Host ("IP: {0} | Uptime: {1}" -f $ip, $uptime) -ForegroundColor Magenta
     if (Test-ShellDeckControlProfile) {
         Write-Host ("Disk: {0} | Profile: {1} | Infra hosts: {2}" -f $disk, $profileLabel, $hostCount) -ForegroundColor DarkCyan

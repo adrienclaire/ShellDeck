@@ -16,6 +16,12 @@ MACHINE_PROFILE=""
 INSTALL_UI="${SHELLDECK_INSTALL_UI:-auto}"
 SHELLDECK_USE_GUM=0
 
+SHELLDECK_LOGO="   _____ __         ____     ____            __
+  / ___// /_  ___  / / /____/ / /__  _____  / /__
+  \\__ \\/ __ \\/ _ \\/ / / ___/ / / _ \\/ ___/ / //_/
+ ___/ / / / /  __/ / / /__/ / /  __/ /__  / ,<
+/____/_/ /_/\\___/_/_/\\___/_/_/\\___/\\___/ /_/|_|  v$SHELL_TOOLS_VERSION"
+
 usage() {
   cat <<'USAGE'
 ShellDeck installer for Linux and macOS.
@@ -184,10 +190,11 @@ dry_run() {
 
 ui_banner() {
   if ui_gum; then
-    printf "ShellDeck\nSmart shell bootstrap and infra-aware installer\n\nProfile-aware setup for control nodes and workstations." |
+    printf "%s\n\nSmart shell bootstrap for workstations and control nodes\nInfra-aware setup. Hardened defaults. Fast terminal workflows." "$SHELLDECK_LOGO" |
       gum style --border rounded --border-foreground 39 --padding "1 2" --margin "1 0" --foreground 255 --bold
   else
-    info "ShellDeck installer"
+    printf "\n%s\n" "$SHELLDECK_LOGO"
+    info "Smart shell bootstrap for workstations and control nodes"
   fi
 }
 

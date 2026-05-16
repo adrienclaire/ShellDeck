@@ -26,6 +26,13 @@ else {
 if ($ClassicUi) { $Ui = "classic" }
 if ($GumUi) { $Ui = "gum" }
 $script:UseGum = $false
+$script:ShellDeckLogo = @"
+   _____ __         ____     ____            __
+  / ___// /_  ___  / / /____/ / /__  _____  / /__
+  \__ \/ __ \/ _ \/ / / ___/ / / _ \/ ___/ / //_/
+ ___/ / / / /  __/ / / /__/ / /  __/ /__  / ,<
+/____/_/ /_/\___/_/_/\___/_/_/\___/\___/ /_/|_|  v$ShellToolsVersion
+"@
 
 function Update-GumPath {
     $candidates = @(
@@ -123,11 +130,13 @@ function Confirm-InstallChoice {
 
 function Show-InstallerBanner {
     if (Test-GumUi) {
-        "ShellDeck`nSmart shell bootstrap and infra-aware installer`n`nProfile-aware setup for control nodes and workstations." |
+        "$script:ShellDeckLogo`n`nSmart shell bootstrap for workstations and control nodes`nInfra-aware setup. Hardened defaults. Fast terminal workflows." |
             gum style --border rounded --border-foreground 39 --padding "1 2" --margin "1 0" --foreground 255 --bold
     }
     else {
-        Write-Step "ShellDeck installer"
+        Write-Host ""
+        Write-Host $script:ShellDeckLogo -ForegroundColor Cyan
+        Write-Step "Smart shell bootstrap for workstations and control nodes"
     }
 }
 
