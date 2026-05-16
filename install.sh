@@ -15,6 +15,7 @@ INSTALL_MODE=""
 MACHINE_PROFILE=""
 INSTALL_UI="${SHELLDECK_INSTALL_UI:-auto}"
 SHELLDECK_USE_GUM=0
+SHELLDECK_SSH_RESTART_OFFERED=0
 
 SHELLDECK_LOGO="   _____ __         ____     ____            __
   / ___// /_  ___  / / /____/ / /__  _____  / /__
@@ -562,6 +563,15 @@ sudo_cmd() {
   else
     sudo "$@"
   fi
+}
+
+sshd_config_file() {
+  printf "%s" "${SHELLDECK_SSHD_CONFIG_FILE:-/etc/ssh/sshd_config}"
+}
+
+pam_service_file() {
+  local service="$1"
+  printf "%s/%s" "${SHELLDECK_PAM_DIR:-/etc/pam.d}" "$service"
 }
 
 run_interactive_command() {
@@ -1503,8 +1513,10 @@ configure_fail2ban() {
 pam_add_google_authenticator() {
   local service="$1"
   local module_line="$2"
-  local pam_file="/etc/pam.d/$service"
+  local pam_file
   local tmp
+
+  pam_file="$(pam_service_file "$service")"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     dry_run "would prepend '$module_line' to $pam_file after creating a backup"
@@ -1535,11 +1547,51 @@ pam_add_google_authenticator() {
   ok "PAM MFA enabled for $service."
 }
 
+pam_comment_sshd_common_auth() {
+  local pam_file
+  local tmp
+
+  pam_file="$(pam_service_file "sshd")"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would comment @include common-auth in $pam_file to require public key + MFA without password"
+    return
+  fi
+
+  if [ ! -f "$pam_file" ]; then
+    warn "PAM file not found: $pam_file"
+    return 1
+  fi
+
+  if ! grep -Eq '^[[:space:]]*@include[[:space:]]+common-auth([[:space:]]*(#.*)?)?$' "$pam_file"; then
+    ok "PAM sshd common-auth include is already disabled or absent."
+    return
+  fi
+
+  tmp="$(mktemp)"
+  awk '
+    /^[[:space:]]*@include[[:space:]]+common-auth([[:space:]]*(#.*)?)?$/ {
+      print "#@include common-auth"
+      next
+    }
+    { print }
+  ' "$pam_file" > "$tmp"
+
+  if [ ! -f "${pam_file}.shell-alias-tools.bak" ]; then
+    sudo_cmd cp "$pam_file" "${pam_file}.shell-alias-tools.bak"
+  fi
+  sudo_cmd cp "$tmp" "$pam_file"
+  rm -f "$tmp"
+  ok "PAM sshd password auth include disabled for public key + MFA."
+}
+
 sshd_set_option() {
   local key="$1"
   local value="$2"
-  local file="/etc/ssh/sshd_config"
+  local file
   local tmp
+
+  file="$(sshd_config_file)"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     dry_run "would set $key $value in $file after creating a backup"
@@ -1553,12 +1605,26 @@ sshd_set_option() {
 
   tmp="$(mktemp)"
   awk -v key="$key" -v value="$value" '
-    BEGIN { lkey = tolower(key); done = 0 }
+    BEGIN { lkey = tolower(key); done = 0; in_match = 0 }
     {
-      line = $0
-      sub(/^[#[:space:]]*/, "", line)
-      split(line, parts, /[[:space:]]+/)
-      if (tolower(parts[1]) == lkey) {
+      raw = $0
+      line = raw
+      sub(/^[[:space:]]*/, "", line)
+      active = line
+      sub(/^#[[:space:]]*/, "", active)
+      split(active, parts, /[[:space:]]+/)
+
+      if (line ~ /^Match[[:space:]]+/) {
+        if (!done) {
+          print key " " value
+          done = 1
+        }
+        in_match = 1
+        print raw
+        next
+      }
+
+      if (!in_match && tolower(parts[1]) == lkey) {
         if (!done) {
           print key " " value
           done = 1
@@ -1579,10 +1645,80 @@ sshd_set_option() {
   rm -f "$tmp"
 }
 
+sshd_set_match_user_option() {
+  local user="$1"
+  local key="$2"
+  local value="$3"
+  local file
+  local tmp
+
+  file="$(sshd_config_file)"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would add Match User $user with $key $value in $file after creating a backup"
+    return
+  fi
+
+  if [ ! -f "$file" ]; then
+    warn "sshd_config was not found. Install/enable the SSH server first."
+    return 1
+  fi
+
+  tmp="$(mktemp)"
+  awk -v user="$user" '
+    $0 == "# ShellDeck managed: start SSH MFA for user " user { skip = 1; next }
+    $0 == "# ShellDeck managed: end SSH MFA for user " user { skip = 0; next }
+    !skip { print }
+  ' "$file" > "$tmp"
+
+  {
+    printf "\n# ShellDeck managed: start SSH MFA for user %s\n" "$user"
+    printf "Match User %s\n" "$user"
+    printf "    %s %s\n" "$key" "$value"
+    printf "# ShellDeck managed: end SSH MFA for user %s\n" "$user"
+  } >> "$tmp"
+
+  if [ ! -f "${file}.shell-alias-tools.bak" ]; then
+    sudo_cmd cp "$file" "${file}.shell-alias-tools.bak"
+  fi
+  sudo_cmd cp "$tmp" "$file"
+  rm -f "$tmp"
+}
+
+configure_sshd_mfa_authentication_methods() {
+  local scope
+  local current_user
+  local value="publickey,keyboard-interactive"
+
+  while true; do
+    scope="$(read_default "Apply SSH public key + MFA requirement to: current or all users" "current")"
+    scope="$(printf "%s" "$scope" | tr '[:upper:]' '[:lower:]')"
+    case "$scope" in
+      current|user|me)
+        current_user="$(id -un)"
+        sshd_set_match_user_option "$current_user" "AuthenticationMethods" "$value" || return 1
+        ok "SSH MFA AuthenticationMethods enabled for current user: $current_user."
+        return
+        ;;
+      all|everybody|global)
+        sshd_set_option "AuthenticationMethods" "$value" || return 1
+        ok "SSH MFA AuthenticationMethods enabled globally."
+        return
+        ;;
+      *)
+        warn "Use current for only $(id -un), or all for every SSH user."
+        ;;
+    esac
+  done
+}
+
 validate_sshd_config() {
   local sshd_cmd=""
-  local file="/etc/ssh/sshd_config"
-  local backup="${file}.shell-alias-tools.bak"
+  local file
+  local backup
+
+  file="$(sshd_config_file)"
+  backup="${file}.shell-alias-tools.bak"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     dry_run "would validate sshd config with sshd -t before reloading SSH"
@@ -1637,9 +1773,38 @@ restart_ssh_service() {
   fi
 }
 
+offer_ssh_restart() {
+  local reason="${1:-SSH configuration changes}"
+
+  if [ "$SHELLDECK_SSH_RESTART_OFFERED" -eq 1 ]; then
+    return 0
+  fi
+
+  if ! validate_sshd_config; then
+    warn "SSH config did not validate. SSH was not restarted."
+    return 1
+  fi
+  SHELLDECK_SSH_RESTART_OFFERED=1
+
+  warn "$reason can lock you out if public key, MFA, PAM, or firewall settings are wrong."
+  warn "Keep an existing SSH session open and test a second login before restarting SSH."
+  if prompt_yes_no "Restart SSH now to apply these changes?" "no"; then
+    if prompt_yes_no "I confirmed SSH key/MFA access works and want to restart SSH" "no"; then
+      restart_ssh_service
+      ok "SSH restarted."
+    else
+      warn "SSH was not restarted. Restart later after testing access."
+    fi
+  else
+    warn "SSH was not restarted. Restart later after testing access."
+  fi
+}
+
 sshd_get_option() {
   local key="$1"
-  local file="/etc/ssh/sshd_config"
+  local file
+
+  file="$(sshd_config_file)"
 
   [ -f "$file" ] || return 1
   awk -v key="$key" '
@@ -1722,7 +1887,7 @@ configure_workstation_ssh_access() {
 
   info "Changing the default SSH port reduces noise from automated scans."
   if prompt_yes_no "Open sshd_config so you can review or change the SSH port?" "no"; then
-    open_file_in_editor "/etc/ssh/sshd_config"
+    open_file_in_editor "$(sshd_config_file)"
   fi
 
   ssh_port="$(sshd_get_option "Port" 2>/dev/null || true)"
@@ -1740,15 +1905,7 @@ configure_workstation_ssh_access() {
   fi
 
   if validate_sshd_config; then
-    if prompt_yes_no "Restart SSH to apply config?" "no"; then
-      warn "Be cautious: keep a working SSH key session open before restarting SSH."
-      if prompt_yes_no "Are you sure you tested SSH key login and want to restart SSH?" "no"; then
-        restart_ssh_service
-        ok "SSH restarted."
-      else
-        warn "SSH was not restarted. Restart later after testing key access."
-      fi
-    fi
+    offer_ssh_restart "Workstation SSH changes"
   else
     warn "SSH config did not validate. SSH was not restarted."
   fi
@@ -1803,14 +1960,12 @@ configure_linux_mfa() {
   case "$target" in
     ssh|both)
       pam_add_google_authenticator "sshd" "$module_line" || true
+      pam_comment_sshd_common_auth || true
       sshd_set_option "UsePAM" "yes" || true
       sshd_set_option "KbdInteractiveAuthentication" "yes" || true
       sshd_set_option "ChallengeResponseAuthentication" "yes" || true
-      if validate_sshd_config; then
-        reload_ssh_service
-      else
-        warn "SSH service was not reloaded because validation failed."
-      fi
+      configure_sshd_mfa_authentication_methods || true
+      offer_ssh_restart "SSH public key + TOTP MFA changes"
       ;;
   esac
 
@@ -2006,4 +2161,6 @@ main() {
   fi
 }
 
-main
+if [ "${SHELLDECK_TEST_SOURCE:-0}" != "1" ]; then
+  main
+fi

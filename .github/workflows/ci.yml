@@ -25,7 +25,9 @@ jobs:
           bash -n install-macos.sh
           bash -n shell-tools.sh
       - name: Run Bash regression tests
-        run: bash tests/test-installer-ui.sh
+        run: |
+          bash tests/test-installer-ui.sh
+          bash tests/test-ssh-mfa-config.sh
       - name: Run workstation onboarding integration flow
         if: matrix.os == 'ubuntu-latest'
         run: bash tests/integration-workstation-flow.sh

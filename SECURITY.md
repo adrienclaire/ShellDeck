@@ -10,6 +10,8 @@ ShellDeck changes shell startup files, installs packages, and can optionally con
 
 ## Safe Install Guidance
 
+Before enabling SSH, firewall, fail2ban, or MFA automation on a production machine, test the full flow in a lab VM and take a snapshot or backup. Keep an active recovery session open while changing SSH/PAM/firewall settings. ShellDeck validates what it can, but you are responsible for confirming access works in your environment; the project cannot be responsible for lockouts, broken access, firewall mistakes, or production outages caused by local configuration choices.
+
 Prefer tagged release URLs over `main`:
 
 ```bash
@@ -52,7 +54,9 @@ These features are disabled or guarded by default:
 - Always allow your active SSH port before enabling UFW on a remote VM.
 - If an active SSH session is detected, UFW enablement defaults to no after a lockout warning.
 - TOTP MFA keeps `nullok` by default so unenrolled users are not locked out during rollout.
-- SSH MFA changes validate `sshd -t` before reloading SSH and restore the installer backup if validation fails.
+- SSH MFA can set `AuthenticationMethods publickey,keyboard-interactive` globally or in a `Match User` block for the current user.
+- SSH MFA comments `@include common-auth` in `/etc/pam.d/sshd` so PAM does not request the account password after TOTP.
+- SSH MFA changes validate `sshd -t` before offering to restart SSH and restore the installer backup if validation fails.
 - Passkey/PAM U2F is not automated yet because it needs per-user hardware key enrollment and mapping.
 
 ## Reporting a Vulnerability

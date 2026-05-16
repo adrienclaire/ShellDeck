@@ -13,6 +13,9 @@
 - Fixed leaked terminal cursor-position responses before Gum choice prompts by avoiding `gum style` immediately before `gum choose`.
 - Fixed editor launches during workstation SSH onboarding so `nano` receives `/dev/tty` when the installer is run through `curl | bash`.
 - Added a pseudo-terminal workstation onboarding integration test that covers the authorized_keys editor flow.
+- Added SSH MFA `AuthenticationMethods publickey,keyboard-interactive` configuration with global or current-user `Match User` scope.
+- SSH MFA now comments `/etc/pam.d/sshd` `@include common-auth` so public-key plus TOTP does not ask for the account password.
+- Added production lockout warnings for SSH, firewall, PAM, and MFA changes.
 
 ## 0.1.4 - 2026-05-13
 

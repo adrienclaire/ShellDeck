@@ -207,6 +207,10 @@ The Gum UI is optional. When available, the installer uses styled sections plus 
 
 ## Linux Security Setup
 
+> **Production safety warning**
+>
+> SSH, firewall, PAM, and MFA changes can lock you out of a machine. Test ShellDeck in a lab VM before using these features in production, keep an active recovery session open, and take a VM snapshot or backup first. You are responsible for validating the generated configuration for your environment; this project cannot be responsible for lockouts, broken access, firewall mistakes, or production outages caused by local configuration choices.
+
 After dependency setup on Linux installs, the installer can guide:
 
 - UFW firewall defaults: deny incoming, allow outgoing.
@@ -215,8 +219,9 @@ After dependency setup on Linux installs, the installer can guide:
 - ICMP echo-request rules for ping, including source-limited LAN rules.
 - fail2ban SSH jail settings: port, retry count, find window, and ban time.
 - Optional TOTP MFA through PAM for SSH, local console login, or both.
+- SSH MFA mode for public-key plus keyboard-interactive authentication, either globally or only for the current user through a `Match User` block.
 
-When you run the installer over SSH, UFW enablement defaults to no after warning you about lockout risk. MFA setup uses `google-authenticator` where available and validates `sshd -t` before reloading SSH. It keeps `nullok` by default during rollout so an unenrolled user is not locked out unless you explicitly choose to require MFA immediately. Passkey/PAM U2F setup is not automated yet because it needs per-user hardware key enrollment and mapping.
+When you run the installer over SSH, UFW enablement defaults to no after warning you about lockout risk. MFA setup uses `google-authenticator` where available, comments `@include common-auth` in `/etc/pam.d/sshd` for SSH MFA so password authentication is not requested after TOTP, and validates `sshd -t` before offering to restart SSH. It keeps `nullok` by default during rollout so an unenrolled user is not locked out unless you explicitly choose to require MFA immediately. Passkey/PAM U2F setup is not automated yet because it needs per-user hardware key enrollment and mapping.
 
 In Workstation profile, SSH hardening is local to the workstation. The installer can enable SSH, prepare `~/.ssh/authorized_keys`, open it in `nano` so you can paste the control node public key, fix permissions, recommend disabling password SSH login only after key login is tested, optionally open `/etc/ssh/sshd_config`, detect the configured SSH port, add that port to UFW, validate `sshd -t`, and restart SSH only after explicit confirmation.
 
