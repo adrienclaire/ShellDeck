@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="260" viewBox="0 0 960 260" role="img" aria-labelledby="title desc">
+  <title id="title">ShellDeck</title>
+  <desc id="desc">ShellDeck logo with a terminal deck icon and wordmark.</desc>
+  <rect width="960" height="260" rx="28" fill="#0b1020"/>
+  <g transform="translate(56 52)">
+    <rect width="156" height="156" rx="22" fill="#101827" stroke="#31d5e8" stroke-width="4"/>
+    <rect x="22" y="26" width="112" height="16" rx="8" fill="#24324a"/>
+    <path d="M42 78l26 22-26 22" fill="none" stroke="#31d5e8" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M84 124h38" fill="none" stroke="#e6edf7" stroke-width="12" stroke-linecap="round"/>
+    <path d="M22 58h112" stroke="#24324a" stroke-width="4"/>
+  </g>
+  <g transform="translate(248 69)">
+    <text x="0" y="62" fill="#f8fbff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="68" font-weight="760" letter-spacing="0">ShellDeck</text>
+    <text x="3" y="111" fill="#94a3b8" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="25" font-weight="500" letter-spacing="0">Smart shell bootstrap for workstations and control nodes</text>
+  </g>
+  <path d="M56 224h848" stroke="#1f2a44" stroke-width="2"/>
+  <circle cx="824" cy="78" r="6" fill="#43e38d"/>
+  <circle cx="850" cy="78" r="6" fill="#31d5e8"/>
+  <circle cx="876" cy="78" r="6" fill="#7aa2ff"/>
+</svg>

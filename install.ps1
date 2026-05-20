@@ -7,11 +7,14 @@ param(
     [string]$Mode = "",
     [Alias("Role")]
     [string]$MachineProfile = "",
+    [string]$Ui = $(if ($env:SHELLDECK_INSTALL_UI) { $env:SHELLDECK_INSTALL_UI } else { "auto" }),
+    [switch]$ClassicUi,
+    [switch]$GumUi,
     [string]$InstallDir = $(if ($env:SHELL_ALIAS_TOOLS_HOME) { $env:SHELL_ALIAS_TOOLS_HOME } else { Join-Path $HOME ".shell-alias-tools" })
 )
 
 $ErrorActionPreference = "Stop"
-$ShellToolsVersion = if ($env:SHELL_TOOLS_VERSION) { $env:SHELL_TOOLS_VERSION } else { "0.1.4" }
+$ShellToolsVersion = if ($env:SHELL_TOOLS_VERSION) { $env:SHELL_TOOLS_VERSION } else { "0.2.0" }
 $ShellAliasToolsRef = if ($env:SHELL_ALIAS_TOOLS_REF) { $env:SHELL_ALIAS_TOOLS_REF } else { "v$ShellToolsVersion" }
 $RawBase = if ($env:SHELL_ALIAS_TOOLS_RAW_BASE) {
     $env:SHELL_ALIAS_TOOLS_RAW_BASE
@@ -20,19 +23,64 @@ else {
     "https://raw.githubusercontent.com/adrienclaire/ShellDeck/$ShellAliasToolsRef"
 }
 
+if ($ClassicUi) { $Ui = "classic" }
+if ($GumUi) { $Ui = "gum" }
+$script:UseGum = $false
+$script:ShellDeckLogo = @"
+   _____ __         ____     ____            __
+  / ___// /_  ___  / / /____/ / /__  _____  / /__
+  \__ \/ __ \/ _ \/ / / ___/ / / _ \/ ___/ / //_/
+ ___/ / / / /  __/ / / /__/ / /  __/ /__  / ,<
+/____/_/ /_/\___/_/_/\___/_/_/\___/\___/ /_/|_|  v$ShellToolsVersion
+"@
+
+function Update-GumPath {
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"),
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"),
+        (Join-Path $HOME ".local\bin"),
+        (Join-Path $HOME "bin")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    foreach ($candidate in $candidates) {
+        if ((";{0};" -f $env:PATH) -notlike "*;$candidate;*") {
+            $env:PATH = "$candidate;$env:PATH"
+        }
+    }
+}
+
+function Test-GumUi {
+    return ($script:UseGum -and (Get-Command gum -ErrorAction SilentlyContinue))
+}
+
 function Write-Step {
     param([string]$Message)
-    Write-Host $Message -ForegroundColor Cyan
+    if (Test-GumUi) {
+        & gum style --foreground 39 --bold $Message
+    }
+    else {
+        Write-Host $Message -ForegroundColor Cyan
+    }
 }
 
 function Write-Ok {
     param([string]$Message)
-    Write-Host $Message -ForegroundColor Green
+    if (Test-GumUi) {
+        & gum style --foreground 42 --bold $Message
+    }
+    else {
+        Write-Host $Message -ForegroundColor Green
+    }
 }
 
 function Write-Warn {
     param([string]$Message)
-    Write-Host $Message -ForegroundColor Yellow
+    if (Test-GumUi) {
+        & gum style --foreground 214 --bold $Message
+    }
+    else {
+        Write-Host $Message -ForegroundColor Yellow
+    }
 }
 
 function Write-DryRun {
@@ -54,6 +102,12 @@ function Confirm-InstallChoice {
         return $Default
     }
 
+    if (Test-GumUi) {
+        $gumDefault = if ($Default) { "true" } else { "false" }
+        & gum confirm "--default=$gumDefault" $Prompt
+        return ($LASTEXITCODE -eq 0)
+    }
+
     $suffix = if ($Default) { "Y/n" } else { "y/N" }
     while ($true) {
         $answer = (Read-Host "$Prompt [$suffix]").Trim().ToLowerInvariant()
@@ -71,6 +125,18 @@ function Confirm-InstallChoice {
             "non" { return $false }
             default { Write-Warn "Please answer yes or no." }
         }
+    }
+}
+
+function Show-InstallerBanner {
+    if (Test-GumUi) {
+        "$script:ShellDeckLogo`n`nSmart shell bootstrap for workstations and control nodes`nInfra-aware setup. Hardened defaults. Fast terminal workflows." |
+            gum style --border rounded --border-foreground 39 --padding "1 2" --margin "1 0" --foreground 255 --bold
+    }
+    else {
+        Write-Host ""
+        Write-Host $script:ShellDeckLogo -ForegroundColor Cyan
+        Write-Step "Smart shell bootstrap for workstations and control nodes"
     }
 }
 
@@ -96,6 +162,17 @@ function Read-InstallMode {
 
     if ($Yes) {
         return "basic"
+    }
+
+    if (Test-GumUi) {
+        Write-Host "Choose dependency setup mode" -ForegroundColor Magenta
+        $choice = & gum choose `
+            "Basic - install required smart-shell dependencies automatically" `
+            "Complete - required dependencies plus Docker, Multipass, and GitHub CLI" `
+            "Manual - ask before installing every dependency"
+        if ($choice -like "Basic*") { return "basic" }
+        if ($choice -like "Complete*") { return "complete" }
+        if ($choice -like "Manual*") { return "manual" }
     }
 
     Write-Step "Setup mode"
@@ -139,6 +216,15 @@ function Read-MachineProfile {
 
     if ($Yes) {
         return "control"
+    }
+
+    if (Test-GumUi) {
+        Write-Host "Choose machine profile" -ForegroundColor Magenta
+        $choice = & gum choose `
+            "Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks" `
+            "Workstation - smart shell plus optional local SSH/security hardening"
+        if ($choice -like "Control*") { return "control" }
+        if ($choice -like "Workstation*") { return "workstation" }
     }
 
     Write-Step "Machine profile"
@@ -318,6 +404,7 @@ function Install-WindowsDependency {
     $wingetPackages = @{
         git       = "Git.Git"
         wget      = "GNU.Wget2"
+        gum       = "Charmbracelet.gum"
         fzf       = "junegunn.fzf"
         bat       = "sharkdp.bat"
         eza       = "eza-community.eza"
@@ -389,7 +476,7 @@ function Install-Dependencies {
     param([string]$SetupMode)
 
     $requiredTools = @(
-        "git", "ssh", "curl", "wget", "fzf", "bash-completion", "bat", "eza", "zoxide",
+        "git", "ssh", "curl", "wget", "gum", "fzf", "bash-completion", "bat", "eza", "zoxide",
         "starship", "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
         "btop", "htop", "duf", "neovim"
     )
@@ -495,7 +582,109 @@ function Configure-Infra {
     }
 }
 
+function Get-InstallerReinvokeArguments {
+    $arguments = @()
+
+    if ($Yes) { $arguments += "-Yes" }
+    if ($SkipDeps) { $arguments += "-SkipDeps" }
+    if ($SkipInfra) { $arguments += "-SkipInfra" }
+    if ($DryRun) { $arguments += "-DryRun" }
+    if (-not [string]::IsNullOrWhiteSpace($Mode)) {
+        $arguments += "-Mode"
+        $arguments += $Mode
+    }
+    if (-not [string]::IsNullOrWhiteSpace($MachineProfile)) {
+        $arguments += "-MachineProfile"
+        $arguments += $MachineProfile
+    }
+    if (-not [string]::IsNullOrWhiteSpace($InstallDir)) {
+        $arguments += "-InstallDir"
+        $arguments += $InstallDir
+    }
+
+    $arguments += "-Ui"
+    $arguments += "gum"
+    return $arguments
+}
+
+function Restart-InstallerWithGumIfPossible {
+    if ($env:SHELLDECK_GUM_REEXECED -eq "1") {
+        return
+    }
+
+    Update-GumPath
+    if (-not (Get-Command gum -ErrorAction SilentlyContinue)) {
+        return
+    }
+
+    if ([string]::IsNullOrWhiteSpace($PSCommandPath) -or -not (Test-Path $PSCommandPath)) {
+        return
+    }
+
+    Write-Step "Relaunching installer with Gum UI..."
+    $env:SHELLDECK_GUM_REEXECED = "1"
+    $arguments = Get-InstallerReinvokeArguments
+    & $PSCommandPath @arguments
+    exit $LASTEXITCODE
+}
+
+function Initialize-InstallerUi {
+    $normalizedUi = $Ui.Trim().ToLowerInvariant()
+
+    if ($normalizedUi -in @("classic", "none", "off")) {
+        $script:UseGum = $false
+        return
+    }
+
+    if ($normalizedUi -notin @("auto", "gum")) {
+        Write-Warn "Unknown -Ui value '$Ui'. Use auto, gum, or classic."
+        $normalizedUi = "auto"
+    }
+
+    Update-GumPath
+    if (Get-Command gum -ErrorAction SilentlyContinue) {
+        $script:UseGum = $true
+        return
+    }
+
+    if ($Yes) {
+        return
+    }
+
+    if ($normalizedUi -eq "auto" -and -not (Confirm-InstallChoice "Install Gum now for a richer installer interface?" $true)) {
+        return
+    }
+
+    if ($DryRun) {
+        Write-DryRun "would install gum with winget for the rich installer UI"
+        return
+    }
+
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Warn "winget is not available. Continuing with the classic installer UI."
+        return
+    }
+
+    try {
+        winget install --id Charmbracelet.gum -e --accept-package-agreements --accept-source-agreements | Out-Host
+    }
+    catch {
+        Write-Warn "Gum install failed. Continuing with the classic installer UI."
+    }
+
+    Update-GumPath
+    if (Get-Command gum -ErrorAction SilentlyContinue) {
+        $script:UseGum = $true
+        Restart-InstallerWithGumIfPossible
+    }
+    else {
+        Write-Warn "Gum is not available after install attempt. Continuing with the classic installer UI."
+    }
+}
+
 function Main {
+    Initialize-InstallerUi
+    Show-InstallerBanner
     $selectedMachineProfile = Read-MachineProfile
     Write-Step "Installing ShellDeck for Windows as $selectedMachineProfile profile..."
     if ($DryRun) {

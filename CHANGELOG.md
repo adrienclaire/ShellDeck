@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+## 0.2.0 - 2026-05-20
+
+- Added optional Gum-powered installer UI for richer choices, confirmations, inputs, and styled installer sections.
+- Added `--ui auto|gum|classic`, `--gum-ui`, and `--classic-ui` for Bash/macOS/Linux installs, plus `-Ui`, `-GumUi`, and `-ClassicUi` for PowerShell.
+- Added Gum bootstrap relaunch behavior for downloaded installers, with PATH refresh and same-process fallback for streamed installs.
+- Added Charmbracelet's official apt repository fallback when `apt-get install gum` cannot locate the package.
+- Added ShellDeck logo assets, a terminal wordmark banner, and refreshed README screenshots for a more polished project presentation.
+- Fixed Gum choice prompts on older Gum builds by avoiding the incompatible `--header` flag.
+- Fixed early machine profile and setup mode prompts falling back to numbered input when a Gum build does not support `gum choose --height`.
+- Fixed Gum detection inside captured selection prompts by checking `/dev/tty` instead of stdout.
+- Fixed leaked terminal cursor-position responses before Gum choice prompts by avoiding `gum style` immediately before `gum choose`.
+- Fixed editor launches during workstation SSH onboarding so `nano` receives `/dev/tty` when the installer is run through `curl | bash`.
+- Added a pseudo-terminal workstation onboarding integration test that covers the authorized_keys editor flow.
+- Added SSH MFA `AuthenticationMethods publickey,keyboard-interactive` configuration with global or current-user `Match User` scope.
+- SSH MFA now comments `/etc/pam.d/sshd` `@include common-auth` so public-key plus TOTP does not ask for the account password.
+- Added production lockout warnings for SSH, firewall, PAM, and MFA changes.
+
 ## 0.1.4 - 2026-05-13
 
 - Added Linux workstation SSH onboarding with authorized_keys setup, optional password-login disablement, SSH port detection, UFW/fail2ban/MFA hardening, and guarded SSH restart prompts.

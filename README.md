@@ -1,37 +1,49 @@
+<p align="center">
+  <img src="docs/assets/shelldeck-logo.svg" alt="ShellDeck - smart shell bootstrap for workstations and control nodes" width="760">
+</p>
+
 # ShellDeck
 
-Cross-platform smart shell bootstrap for fresh VMs, workstations, and homelab control nodes.
+ShellDeck is a cross-platform smart shell bootstrap for fresh VMs, workstations, and homelab control nodes.
 
 ShellDeck installs a profile runtime that upgrades your terminal startup, keeps personal aliases/functions in one place, and can optionally turn a control node into an infra dashboard for SSH hosts such as Proxmox, Docker VMs, and app servers.
+
+## Screenshots
+
+![ShellDeck Gum installer profile selection](docs/screenshots/shelldeck-installer-profile.png)
+
+![ShellDeck workstation SSH hardening flow](docs/screenshots/shelldeck-workstation-hardening.png)
+
+![ShellDeck infra dashboard](docs/screenshots/shelldeck-infra-dashboard.png)
 
 ## One-command install
 
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.ps1 -OutFile install.ps1
 .\install.ps1
 ```
 
 ### Linux
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.sh
 bash install.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.sh
 bash install.sh
 ```
 
 To verify checksums first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```
@@ -50,7 +62,7 @@ bash install-macos.sh
 - Lets you choose a machine profile first: Control node for infra management, or Workstation for smart shell only.
 - Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, profile, and smart-tool status.
 - Turns Bash into a smarter daily shell with clean shared history, Bash completion, fzf key bindings, a Starship prompt, modern file listing, pretty file reading, smart directory jumping, fuzzy file picking, archive extraction, port inspection, and safe fallbacks.
-- Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `wget`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `starship`, `ripgrep`, `fd`, `jq`, `yq`, `nc`, `tree`, `unzip`, `zip`, `rsync`, `tmux`, `btop`, `htop`, `duf`, `neovim`, `gh`, `docker`, and `multipass` where supported.
+- Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `wget`, `gum`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `starship`, `ripgrep`, `fd`, `jq`, `yq`, `nc`, `tree`, `unzip`, `zip`, `rsync`, `tmux`, `btop`, `htop`, `duf`, `neovim`, `gh`, `docker`, and `multipass` where supported.
 - On Linux installs, adds VM hardening helpers: `ufw` and `fail2ban`, with optional guided configuration.
 - Lets you choose Basic, Complete, or Manual dependency setup at install time.
 - In Control node profile, asks whether to enable inbound SSH, configure Linux security, add SSH hosts, store infra hosts, and track one host with many exposed service ports.
@@ -128,6 +140,9 @@ Windows:
 ```powershell
 .\install.ps1 -Yes
 .\install.ps1 -DryRun
+.\install.ps1 -Ui auto
+.\install.ps1 -GumUi
+.\install.ps1 -ClassicUi
 .\install.ps1 -MachineProfile control
 .\install.ps1 -MachineProfile workstation
 .\install.ps1 -Mode basic
@@ -142,6 +157,9 @@ Linux/macOS:
 ```bash
 bash install.sh --yes
 bash install.sh --dry-run
+bash install.sh --ui auto
+bash install.sh --gum-ui
+bash install.sh --classic-ui
 bash install.sh --profile control
 bash install.sh --profile workstation
 bash install.sh --mode basic
@@ -170,6 +188,16 @@ On apt-based Linux systems, the installer runs `apt-get update`, counts availabl
 
 `--dry-run` / `-DryRun` previews file writes, package installs, profile hooks, SSH setup, and Linux security actions without changing the system.
 
+Installer UI:
+
+```text
+auto      Use Gum when available and offer to install it interactively.
+gum       Prefer Gum and try to install it when missing.
+classic   Use portable text prompts only.
+```
+
+The Gum UI is optional. When available, the installer uses styled sections plus interactive choices, confirmations, and inputs. If Gum is missing, ShellDeck can install it first. On apt-based Linux systems where `gum` is not in the default repositories, the installer adds Charmbracelet's official apt repository and retries. A downloaded installer re-launches itself with Gum after installation; `curl | bash` cannot reliably re-exec the consumed stream, so it refreshes PATH and continues with Gum when available. If Gum is unavailable or the script is non-interactive, ShellDeck falls back to classic prompts.
+
 ## Safety Defaults
 
 - `please` is disabled by default because it re-runs shell history with elevated privileges. Enable it with `SHELL_TOOLS_ENABLE_PLEASE=1`.
@@ -179,6 +207,10 @@ On apt-based Linux systems, the installer runs `apt-get update`, counts availabl
 
 ## Linux Security Setup
 
+> **Production safety warning**
+>
+> SSH, firewall, PAM, and MFA changes can lock you out of a machine. Test ShellDeck in a lab VM before using these features in production, keep an active recovery session open, and take a VM snapshot or backup first. You are responsible for validating the generated configuration for your environment; this project cannot be responsible for lockouts, broken access, firewall mistakes, or production outages caused by local configuration choices.
+
 After dependency setup on Linux installs, the installer can guide:
 
 - UFW firewall defaults: deny incoming, allow outgoing.
@@ -187,8 +219,9 @@ After dependency setup on Linux installs, the installer can guide:
 - ICMP echo-request rules for ping, including source-limited LAN rules.
 - fail2ban SSH jail settings: port, retry count, find window, and ban time.
 - Optional TOTP MFA through PAM for SSH, local console login, or both.
+- SSH MFA mode for public-key plus keyboard-interactive authentication, either globally or only for the current user through a `Match User` block.
 
-When you run the installer over SSH, UFW enablement defaults to no after warning you about lockout risk. MFA setup uses `google-authenticator` where available and validates `sshd -t` before reloading SSH. It keeps `nullok` by default during rollout so an unenrolled user is not locked out unless you explicitly choose to require MFA immediately. Passkey/PAM U2F setup is not automated yet because it needs per-user hardware key enrollment and mapping.
+When you run the installer over SSH, UFW enablement defaults to no after warning you about lockout risk. MFA setup uses `google-authenticator` where available, comments `@include common-auth` in `/etc/pam.d/sshd` for SSH MFA so password authentication is not requested after TOTP, and validates `sshd -t` before offering to restart SSH. It keeps `nullok` by default during rollout so an unenrolled user is not locked out unless you explicitly choose to require MFA immediately. Passkey/PAM U2F setup is not automated yet because it needs per-user hardware key enrollment and mapping.
 
 In Workstation profile, SSH hardening is local to the workstation. The installer can enable SSH, prepare `~/.ssh/authorized_keys`, open it in `nano` so you can paste the control node public key, fix permissions, recommend disabling password SSH login only after key login is tested, optionally open `/etc/ssh/sshd_config`, detect the configured SSH port, add that port to UFW, validate `sshd -t`, and restart SSH only after explicit confirmation.
 
@@ -260,4 +293,5 @@ install-macos.sh   macOS wrapper
 alias-tools.ps1    PowerShell runtime
 shell-tools.sh     Bash/Zsh runtime
 alias-tools.md     Original Bash alias-tool example
+docs/screenshots   Browser-rendered README screenshots
 ```

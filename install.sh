@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SHELL_TOOLS_VERSION="${SHELL_TOOLS_VERSION:-0.1.4}"
+ORIGINAL_ARGS=("$@")
+SHELL_TOOLS_VERSION="${SHELL_TOOLS_VERSION:-0.2.0}"
 SHELL_ALIAS_TOOLS_REF="${SHELL_ALIAS_TOOLS_REF:-v$SHELL_TOOLS_VERSION}"
 RAW_BASE="${SHELL_ALIAS_TOOLS_RAW_BASE:-https://raw.githubusercontent.com/adrienclaire/ShellDeck/$SHELL_ALIAS_TOOLS_REF}"
 INSTALL_DIR="${SHELL_ALIAS_TOOLS_HOME:-$HOME/.shell-alias-tools}"
@@ -12,17 +13,27 @@ DRY_RUN=0
 OS_OVERRIDE=""
 INSTALL_MODE=""
 MACHINE_PROFILE=""
+INSTALL_UI="${SHELLDECK_INSTALL_UI:-auto}"
+SHELLDECK_USE_GUM=0
+SHELLDECK_SSH_RESTART_OFFERED=0
+
+SHELLDECK_LOGO="   _____ __         ____     ____            __
+  / ___// /_  ___  / / /____/ / /__  _____  / /__
+  \\__ \\/ __ \\/ _ \\/ / / ___/ / / _ \\/ ___/ / //_/
+ ___/ / / / /  __/ / / /__/ / /  __/ /__  / ,<
+/____/_/ /_/\\___/_/_/\\___/_/_/\\___/\\___/ /_/|_|  v$SHELL_TOOLS_VERSION"
 
 usage() {
   cat <<'USAGE'
 ShellDeck installer for Linux and macOS.
 
 Usage:
-  bash install.sh [--yes] [--dry-run] [--profile control|workstation] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
+  bash install.sh [--yes] [--dry-run] [--ui auto|gum|classic] [--profile control|workstation] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
 
 Examples:
-  curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh && bash install.sh
+  curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.sh && bash install.sh
   bash install.sh --dry-run
+  bash install.sh --ui gum
 USAGE
 }
 
@@ -58,6 +69,21 @@ while [ $# -gt 0 ]; do
       fi
       MACHINE_PROFILE="${1:-}"
       ;;
+    --ui)
+      shift
+      if [ $# -eq 0 ]; then
+        echo "Missing value for --ui" >&2
+        usage
+        exit 1
+      fi
+      INSTALL_UI="${1:-}"
+      ;;
+    --classic-ui)
+      INSTALL_UI="classic"
+      ;;
+    --gum-ui)
+      INSTALL_UI="gum"
+      ;;
     --os)
       shift
       if [ $# -eq 0 ]; then
@@ -80,6 +106,49 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+ui_can_prompt() {
+  [ "$ASSUME_YES" -eq 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]
+}
+
+ui_gum() {
+  [ "$SHELLDECK_USE_GUM" -eq 1 ] && command -v gum >/dev/null 2>&1 && ui_can_prompt
+}
+
+refresh_gum_path() {
+  local dir
+
+  for dir in \
+    "$HOME/.local/bin" \
+    "$HOME/bin" \
+    /opt/homebrew/bin \
+    /usr/local/bin \
+    /snap/bin; do
+    [ -d "$dir" ] || continue
+    case ":$PATH:" in
+      *":$dir:"*) ;;
+      *) PATH="$dir:$PATH" ;;
+    esac
+  done
+  export PATH
+}
+
+reexec_with_gum_if_possible() {
+  local script_path
+
+  [ "${SHELLDECK_GUM_REEXECED:-0}" = "1" ] && return 1
+  ui_can_prompt || return 1
+  command -v gum >/dev/null 2>&1 || return 1
+
+  script_path="${BASH_SOURCE[0]:-$0}"
+  [ -f "$script_path" ] && [ -r "$script_path" ] || return 1
+  case "$script_path" in
+    /dev/fd/*|/proc/*/fd/*|-) return 1 ;;
+  esac
+
+  info "Relaunching installer with Gum UI..."
+  exec env SHELLDECK_GUM_REEXECED=1 bash "$script_path" "${ORIGINAL_ARGS[@]}" --ui gum
+}
+
 color() {
   local code="$1"
   shift
@@ -91,21 +160,95 @@ color() {
 }
 
 info() {
-  color "36" "$*"
+  if ui_gum; then
+    gum style --foreground 39 --bold "$*" || color "36" "$*"
+  else
+    color "36" "$*"
+  fi
 }
 
 ok() {
-  color "32" "$*"
+  if ui_gum; then
+    gum style --foreground 42 --bold "$*" || color "32" "$*"
+  else
+    color "32" "$*"
+  fi
 }
 
 warn() {
-  color "33" "$*" >&2
+  if ui_gum; then
+    gum style --foreground 214 --bold "$*" >&2 || color "33" "$*" >&2
+  else
+    color "33" "$*" >&2
+  fi
 }
 
 dry_run() {
   if [ "$DRY_RUN" -eq 1 ]; then
     color "35" "[dry-run] $*" >&2
   fi
+}
+
+ui_banner() {
+  if ui_gum; then
+    printf "%s\n\nSmart shell bootstrap for workstations and control nodes\nInfra-aware setup. Hardened defaults. Fast terminal workflows." "$SHELLDECK_LOGO" |
+      gum style --border rounded --border-foreground 39 --padding "1 2" --margin "1 0" --foreground 255 --bold
+  else
+    printf "\n%s\n" "$SHELLDECK_LOGO"
+    info "Smart shell bootstrap for workstations and control nodes"
+  fi
+}
+
+ui_section() {
+  local title="$1"
+
+  if ui_gum; then
+    gum style --foreground 205 --bold --margin "1 0 0 0" "$title" || info "$title"
+  else
+    info "$title"
+  fi
+}
+
+ui_confirm() {
+  local prompt="$1"
+  local default="${2:-yes}"
+  local gum_default="true"
+
+  ui_gum || return 2
+  [ "$default" = "yes" ] || gum_default="false"
+
+  if gum confirm --default="$gum_default" "$prompt" < /dev/tty; then
+    return 0
+  fi
+
+  return 1
+}
+
+ui_input() {
+  local prompt="$1"
+  local default="${2:-}"
+  local value
+
+  ui_gum || return 2
+
+  if [ -n "$default" ]; then
+    value="$(gum input --prompt "$prompt: " --value "$default" < /dev/tty)" || return 2
+  else
+    value="$(gum input --prompt "$prompt: " < /dev/tty)" || return 2
+  fi
+
+  printf "%s" "$value"
+}
+
+ui_choose() {
+  local prompt="$1"
+  shift
+  local selected
+
+  ui_gum || return 2
+  printf "\033[95;1m%s\033[0m\n" "$prompt" > /dev/tty
+  selected="$(gum choose "$@" < /dev/tty)" || return 2
+  printf "%s" "$selected"
 }
 
 prompt_yes_no() {
@@ -120,6 +263,12 @@ prompt_yes_no() {
   if [ "$ASSUME_YES" -eq 1 ]; then
     [ "$default" = "yes" ]
     return
+  fi
+
+  if ui_confirm "$prompt" "$default"; then
+    return 0
+  elif [ "$?" -eq 1 ]; then
+    return 1
   fi
 
   if [ "$default" = "yes" ]; then
@@ -161,6 +310,15 @@ read_default() {
 
   if [ "$ASSUME_YES" -eq 1 ]; then
     printf "%s" "$default"
+    return
+  fi
+
+  if value="$(ui_input "$prompt" "$default")"; then
+    if [ -n "$value" ]; then
+      printf "%s" "$value"
+    else
+      printf "%s" "$default"
+    fi
     return
   fi
 
@@ -309,9 +467,18 @@ choose_machine_profile() {
     return
   fi
 
+  if choice="$(ui_choose "Choose machine profile" \
+    "Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks" \
+    "Workstation - smart shell plus optional local SSH/security hardening")"; then
+    case "$choice" in
+      Control*) printf "control"; return ;;
+      Workstation*) printf "workstation"; return ;;
+    esac
+  fi
+
   info "Machine profile" >&2
   printf "  1) Control node - smart shell plus infra dashboard, SSH shortcuts, host/service checks\n" >&2
-  printf "  2) Workstation  - smart shell only, no infra dashboard or SSH host management\n" >&2
+  printf "  2) Workstation  - smart shell plus optional local SSH/security hardening\n" >&2
 
   while true; do
     choice="$(read_default "Choose machine profile" "1")"
@@ -340,6 +507,17 @@ choose_install_mode() {
   if [ "$ASSUME_YES" -eq 1 ]; then
     printf "basic"
     return
+  fi
+
+  if choice="$(ui_choose "Choose dependency setup mode" \
+    "Basic - install required smart-shell dependencies automatically" \
+    "Complete - required dependencies plus Docker, Multipass, and GitHub CLI" \
+    "Manual - ask before installing every dependency")"; then
+    case "$choice" in
+      Basic*) printf "basic"; return ;;
+      Complete*) printf "complete"; return ;;
+      Manual*) printf "manual"; return ;;
+    esac
   fi
 
   info "Setup mode" >&2
@@ -384,6 +562,33 @@ sudo_cmd() {
     "$@"
   else
     sudo "$@"
+  fi
+}
+
+sshd_config_file() {
+  printf "%s" "${SHELLDECK_SSHD_CONFIG_FILE:-/etc/ssh/sshd_config}"
+}
+
+pam_service_file() {
+  local service="$1"
+  printf "%s/%s" "${SHELLDECK_PAM_DIR:-/etc/pam.d}" "$service"
+}
+
+run_interactive_command() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would run interactive command: $*"
+    return 0
+  fi
+
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    warn "A real terminal is required for: $*"
+    return 1
+  fi
+
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@" < /dev/tty > /dev/tty 2> /dev/tty
+  else
+    sudo "$@" < /dev/tty > /dev/tty 2> /dev/tty
   fi
 }
 
@@ -534,6 +739,7 @@ linux_package_for_tool() {
     apt:htop) printf "htop" ;;
     apt:duf) printf "duf" ;;
     apt:neovim) printf "neovim" ;;
+    apt:gum) printf "gum" ;;
     apt:ufw) printf "ufw" ;;
     apt:fail2ban) printf "fail2ban" ;;
     apt:google-authenticator) printf "libpam-google-authenticator" ;;
@@ -564,6 +770,7 @@ linux_package_for_tool() {
     dnf:htop) printf "htop" ;;
     dnf:duf) printf "duf" ;;
     dnf:neovim) printf "neovim" ;;
+    dnf:gum) printf "gum" ;;
     dnf:ufw) printf "ufw" ;;
     dnf:fail2ban) printf "fail2ban" ;;
     dnf:google-authenticator) printf "google-authenticator" ;;
@@ -594,6 +801,7 @@ linux_package_for_tool() {
     pacman:htop) printf "htop" ;;
     pacman:duf) printf "duf" ;;
     pacman:neovim) printf "neovim" ;;
+    pacman:gum) printf "gum" ;;
     pacman:ufw) printf "ufw" ;;
     pacman:fail2ban) printf "fail2ban" ;;
     pacman:google-authenticator) printf "libpam-google-authenticator" ;;
@@ -624,6 +832,7 @@ linux_package_for_tool() {
     apk:htop) printf "htop" ;;
     apk:duf) printf "duf" ;;
     apk:neovim) printf "neovim" ;;
+    apk:gum) printf "gum" ;;
     apk:ufw) printf "ufw" ;;
     apk:fail2ban) printf "fail2ban" ;;
     apk:google-authenticator) printf "" ;;
@@ -667,6 +876,35 @@ apt_update_and_offer_upgrade() {
   fi
 }
 
+install_gum_from_charm_apt() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would add Charmbracelet apt repository and install gum"
+    return 0
+  fi
+
+  command -v curl >/dev/null 2>&1 || {
+    warn "curl is required to add the Charmbracelet apt repository for Gum."
+    return 1
+  }
+
+  if ! command -v gpg >/dev/null 2>&1; then
+    sudo_cmd apt-get update
+    sudo_cmd apt-get install -y gnupg
+  fi
+
+  sudo_cmd mkdir -p /etc/apt/keyrings
+  if [ ! -f /etc/apt/keyrings/charm.gpg ]; then
+    curl -fsSL https://repo.charm.sh/apt/gpg.key |
+      sudo_cmd gpg --dearmor -o /etc/apt/keyrings/charm.gpg
+  fi
+
+  printf "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *\n" |
+    sudo_cmd tee /etc/apt/sources.list.d/charm.list >/dev/null
+
+  sudo_cmd apt-get update
+  sudo_cmd apt-get install -y gum
+}
+
 install_linux_dependency() {
   local tool="$1"
   local manager="$2"
@@ -708,7 +946,16 @@ install_linux_dependency() {
   fi
 
   case "$manager" in
-    apt) sudo_cmd apt-get install -y "$package" ;;
+    apt)
+      if ! sudo_cmd apt-get install -y "$package"; then
+        if [ "$tool" = "gum" ]; then
+          warn "Gum is not available from the default apt repositories. Adding the official Charmbracelet apt repository."
+          install_gum_from_charm_apt
+        else
+          return 1
+        fi
+      fi
+      ;;
     dnf) sudo_cmd dnf install -y "$package" ;;
     pacman) sudo_cmd pacman -Sy --needed --noconfirm "$package" ;;
     apk) sudo_cmd apk add --no-cache "$package" ;;
@@ -741,6 +988,63 @@ install_macos_dependency() {
     nc) brew install netcat ;;
     *) brew install "$tool" ;;
   esac
+}
+
+bootstrap_gum_ui() {
+  local os="$1"
+  local manager=""
+
+  case "$(printf "%s" "$INSTALL_UI" | tr '[:upper:]' '[:lower:]')" in
+    classic|none|off)
+      SHELLDECK_USE_GUM=0
+      return
+      ;;
+    auto|gum)
+      ;;
+    *)
+      warn "Unknown --ui value '$INSTALL_UI'. Use auto, gum, or classic."
+      INSTALL_UI="auto"
+      ;;
+  esac
+
+  if command -v gum >/dev/null 2>&1 && ui_can_prompt; then
+    SHELLDECK_USE_GUM=1
+    return
+  fi
+
+  ui_can_prompt || return 0
+  [ "$ASSUME_YES" -eq 0 ] || return 0
+
+  if [ "$INSTALL_UI" = "auto" ] && ! prompt_yes_no "Install Gum now for a richer installer interface?" "yes"; then
+    return 0
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would install gum for the rich installer UI"
+    return
+  fi
+
+  case "$os" in
+    linux)
+      manager="$(detect_linux_package_manager)"
+      if [ -z "$manager" ]; then
+        warn "No supported Linux package manager found for Gum. Continuing with the classic installer UI."
+        return
+      fi
+      install_linux_dependency "gum" "$manager" || true
+      ;;
+    macos)
+      install_macos_dependency "gum" "yes" || true
+      ;;
+  esac
+
+  refresh_gum_path
+  if command -v gum >/dev/null 2>&1; then
+    SHELLDECK_USE_GUM=1
+    reexec_with_gum_if_possible || true
+  else
+    warn "Gum is not available after install attempt. Continuing with the classic installer UI."
+  fi
 }
 
 dependency_path() {
@@ -792,7 +1096,7 @@ install_dependencies() {
   local status
   local install_label
   local command_path
-  local required_tools="git ssh curl wget fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim"
+  local required_tools="git ssh curl wget gum fzf bash-completion bat eza zoxide starship ripgrep fd jq yq nc tree unzip zip rsync tmux btop htop duf neovim"
   local optional_tools="gh docker multipass"
 
   if [ "$os" = "linux" ]; then
@@ -806,7 +1110,7 @@ install_dependencies() {
     fi
   fi
 
-  info "Dependency setup"
+  ui_section "Dependency setup"
   case "$mode" in
     basic)
       info "Basic mode: installing required smart-shell dependencies automatically."
@@ -1209,8 +1513,10 @@ configure_fail2ban() {
 pam_add_google_authenticator() {
   local service="$1"
   local module_line="$2"
-  local pam_file="/etc/pam.d/$service"
+  local pam_file
   local tmp
+
+  pam_file="$(pam_service_file "$service")"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     dry_run "would prepend '$module_line' to $pam_file after creating a backup"
@@ -1241,11 +1547,51 @@ pam_add_google_authenticator() {
   ok "PAM MFA enabled for $service."
 }
 
+pam_comment_sshd_common_auth() {
+  local pam_file
+  local tmp
+
+  pam_file="$(pam_service_file "sshd")"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would comment @include common-auth in $pam_file to require public key + MFA without password"
+    return
+  fi
+
+  if [ ! -f "$pam_file" ]; then
+    warn "PAM file not found: $pam_file"
+    return 1
+  fi
+
+  if ! grep -Eq '^[[:space:]]*@include[[:space:]]+common-auth([[:space:]]*(#.*)?)?$' "$pam_file"; then
+    ok "PAM sshd common-auth include is already disabled or absent."
+    return
+  fi
+
+  tmp="$(mktemp)"
+  awk '
+    /^[[:space:]]*@include[[:space:]]+common-auth([[:space:]]*(#.*)?)?$/ {
+      print "#@include common-auth"
+      next
+    }
+    { print }
+  ' "$pam_file" > "$tmp"
+
+  if [ ! -f "${pam_file}.shell-alias-tools.bak" ]; then
+    sudo_cmd cp "$pam_file" "${pam_file}.shell-alias-tools.bak"
+  fi
+  sudo_cmd cp "$tmp" "$pam_file"
+  rm -f "$tmp"
+  ok "PAM sshd password auth include disabled for public key + MFA."
+}
+
 sshd_set_option() {
   local key="$1"
   local value="$2"
-  local file="/etc/ssh/sshd_config"
+  local file
   local tmp
+
+  file="$(sshd_config_file)"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     dry_run "would set $key $value in $file after creating a backup"
@@ -1259,12 +1605,26 @@ sshd_set_option() {
 
   tmp="$(mktemp)"
   awk -v key="$key" -v value="$value" '
-    BEGIN { lkey = tolower(key); done = 0 }
+    BEGIN { lkey = tolower(key); done = 0; in_match = 0 }
     {
-      line = $0
-      sub(/^[#[:space:]]*/, "", line)
-      split(line, parts, /[[:space:]]+/)
-      if (tolower(parts[1]) == lkey) {
+      raw = $0
+      line = raw
+      sub(/^[[:space:]]*/, "", line)
+      active = line
+      sub(/^#[[:space:]]*/, "", active)
+      split(active, parts, /[[:space:]]+/)
+
+      if (line ~ /^Match[[:space:]]+/) {
+        if (!done) {
+          print key " " value
+          done = 1
+        }
+        in_match = 1
+        print raw
+        next
+      }
+
+      if (!in_match && tolower(parts[1]) == lkey) {
         if (!done) {
           print key " " value
           done = 1
@@ -1285,10 +1645,80 @@ sshd_set_option() {
   rm -f "$tmp"
 }
 
+sshd_set_match_user_option() {
+  local user="$1"
+  local key="$2"
+  local value="$3"
+  local file
+  local tmp
+
+  file="$(sshd_config_file)"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry_run "would add Match User $user with $key $value in $file after creating a backup"
+    return
+  fi
+
+  if [ ! -f "$file" ]; then
+    warn "sshd_config was not found. Install/enable the SSH server first."
+    return 1
+  fi
+
+  tmp="$(mktemp)"
+  awk -v user="$user" '
+    $0 == "# ShellDeck managed: start SSH MFA for user " user { skip = 1; next }
+    $0 == "# ShellDeck managed: end SSH MFA for user " user { skip = 0; next }
+    !skip { print }
+  ' "$file" > "$tmp"
+
+  {
+    printf "\n# ShellDeck managed: start SSH MFA for user %s\n" "$user"
+    printf "Match User %s\n" "$user"
+    printf "    %s %s\n" "$key" "$value"
+    printf "# ShellDeck managed: end SSH MFA for user %s\n" "$user"
+  } >> "$tmp"
+
+  if [ ! -f "${file}.shell-alias-tools.bak" ]; then
+    sudo_cmd cp "$file" "${file}.shell-alias-tools.bak"
+  fi
+  sudo_cmd cp "$tmp" "$file"
+  rm -f "$tmp"
+}
+
+configure_sshd_mfa_authentication_methods() {
+  local scope
+  local current_user
+  local value="publickey,keyboard-interactive"
+
+  while true; do
+    scope="$(read_default "Apply SSH public key + MFA requirement to: current or all users" "current")"
+    scope="$(printf "%s" "$scope" | tr '[:upper:]' '[:lower:]')"
+    case "$scope" in
+      current|user|me)
+        current_user="$(id -un)"
+        sshd_set_match_user_option "$current_user" "AuthenticationMethods" "$value" || return 1
+        ok "SSH MFA AuthenticationMethods enabled for current user: $current_user."
+        return
+        ;;
+      all|everybody|global)
+        sshd_set_option "AuthenticationMethods" "$value" || return 1
+        ok "SSH MFA AuthenticationMethods enabled globally."
+        return
+        ;;
+      *)
+        warn "Use current for only $(id -un), or all for every SSH user."
+        ;;
+    esac
+  done
+}
+
 validate_sshd_config() {
   local sshd_cmd=""
-  local file="/etc/ssh/sshd_config"
-  local backup="${file}.shell-alias-tools.bak"
+  local file
+  local backup
+
+  file="$(sshd_config_file)"
+  backup="${file}.shell-alias-tools.bak"
 
   if [ "$DRY_RUN" -eq 1 ]; then
     dry_run "would validate sshd config with sshd -t before reloading SSH"
@@ -1343,9 +1773,38 @@ restart_ssh_service() {
   fi
 }
 
+offer_ssh_restart() {
+  local reason="${1:-SSH configuration changes}"
+
+  if [ "$SHELLDECK_SSH_RESTART_OFFERED" -eq 1 ]; then
+    return 0
+  fi
+
+  if ! validate_sshd_config; then
+    warn "SSH config did not validate. SSH was not restarted."
+    return 1
+  fi
+  SHELLDECK_SSH_RESTART_OFFERED=1
+
+  warn "$reason can lock you out if public key, MFA, PAM, or firewall settings are wrong."
+  warn "Keep an existing SSH session open and test a second login before restarting SSH."
+  if prompt_yes_no "Restart SSH now to apply these changes?" "no"; then
+    if prompt_yes_no "I confirmed SSH key/MFA access works and want to restart SSH" "no"; then
+      restart_ssh_service
+      ok "SSH restarted."
+    else
+      warn "SSH was not restarted. Restart later after testing access."
+    fi
+  else
+    warn "SSH was not restarted. Restart later after testing access."
+  fi
+}
+
 sshd_get_option() {
   local key="$1"
-  local file="/etc/ssh/sshd_config"
+  local file
+
+  file="$(sshd_config_file)"
 
   [ -f "$file" ] || return 1
   awk -v key="$key" '
@@ -1374,7 +1833,7 @@ open_file_in_editor() {
     editor="vi"
   fi
 
-  sudo_cmd "$editor" "$file"
+  run_interactive_command "$editor" "$file"
 }
 
 prepare_authorized_keys() {
@@ -1428,7 +1887,7 @@ configure_workstation_ssh_access() {
 
   info "Changing the default SSH port reduces noise from automated scans."
   if prompt_yes_no "Open sshd_config so you can review or change the SSH port?" "no"; then
-    open_file_in_editor "/etc/ssh/sshd_config"
+    open_file_in_editor "$(sshd_config_file)"
   fi
 
   ssh_port="$(sshd_get_option "Port" 2>/dev/null || true)"
@@ -1446,15 +1905,7 @@ configure_workstation_ssh_access() {
   fi
 
   if validate_sshd_config; then
-    if prompt_yes_no "Restart SSH to apply config?" "no"; then
-      warn "Be cautious: keep a working SSH key session open before restarting SSH."
-      if prompt_yes_no "Are you sure you tested SSH key login and want to restart SSH?" "no"; then
-        restart_ssh_service
-        ok "SSH restarted."
-      else
-        warn "SSH was not restarted. Restart later after testing key access."
-      fi
-    fi
+    offer_ssh_restart "Workstation SSH changes"
   else
     warn "SSH config did not validate. SSH was not restarted."
   fi
@@ -1509,14 +1960,12 @@ configure_linux_mfa() {
   case "$target" in
     ssh|both)
       pam_add_google_authenticator "sshd" "$module_line" || true
+      pam_comment_sshd_common_auth || true
       sshd_set_option "UsePAM" "yes" || true
       sshd_set_option "KbdInteractiveAuthentication" "yes" || true
       sshd_set_option "ChallengeResponseAuthentication" "yes" || true
-      if validate_sshd_config; then
-        reload_ssh_service
-      else
-        warn "SSH service was not reloaded because validation failed."
-      fi
+      configure_sshd_mfa_authentication_methods || true
+      offer_ssh_restart "SSH public key + TOTP MFA changes"
       ;;
   esac
 
@@ -1534,7 +1983,7 @@ configure_linux_security() {
 
   [ "$os" = "linux" ] || return
 
-  info "Linux security setup"
+  ui_section "Linux security setup"
   configure_ufw_firewall
   configure_fail2ban
   configure_linux_mfa
@@ -1653,6 +2102,8 @@ main() {
   local mode="basic"
 
   os="$(detect_os)"
+  bootstrap_gum_ui "$os"
+  ui_banner
   machine_profile="$(choose_machine_profile)"
   info "Installing ShellDeck for $os as $machine_profile profile..."
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -1710,4 +2161,6 @@ main() {
   fi
 }
 
-main
+if [ "${SHELLDECK_TEST_SOURCE:-0}" != "1" ]; then
+  main
+fi
