@@ -15,8 +15,8 @@ Before enabling SSH, firewall, fail2ban, or MFA automation on a production machi
 Prefer tagged release URLs over `main`:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```
@@ -24,8 +24,8 @@ bash install.sh
 On Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/install.ps1 -OutFile install.ps1
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.1.4/checksums.txt -OutFile checksums.txt
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/checksums.txt -OutFile checksums.txt
 Get-FileHash .\install.ps1 -Algorithm SHA256
 .\install.ps1
 ```
