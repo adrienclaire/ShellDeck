@@ -1411,10 +1411,10 @@ _shell_tools_docker_scan() {
   command -v ssh >/dev/null 2>&1 || return 0
 
   if [ "$in_ssh_config" = "true" ]; then
-    containers="$(ssh -o BatchMode=yes -o ConnectTimeout=3 "$name" "docker ps --format '{{.Names}}|{{.Ports}}'" 2>/dev/null || true)"
+    containers="$(ssh -n -o BatchMode=yes -o ConnectTimeout=3 "$name" "docker ps --format '{{.Names}}|{{.Ports}}'" 2>/dev/null || true)"
   elif [ -n "$user" ] && [ -n "$host" ] && [ -n "$port" ]; then
     target="$user@$host"
-    containers="$(ssh -o BatchMode=yes -o ConnectTimeout=3 -p "$port" "$target" "docker ps --format '{{.Names}}|{{.Ports}}'" 2>/dev/null || true)"
+    containers="$(ssh -n -o BatchMode=yes -o ConnectTimeout=3 -p "$port" "$target" "docker ps --format '{{.Names}}|{{.Ports}}'" 2>/dev/null || true)"
   else
     return 0
   fi
