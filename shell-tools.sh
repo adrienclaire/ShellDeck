@@ -1595,6 +1595,7 @@ myhelp() {
     printf "sshhosts      Pick an SSH host and connect\n"
   fi
   printf "check-tools   Check local CLI dependencies\n"
+  printf "shelldeck-update Update runtime and preserve user data\n"
   printf "shelluninstall Remove profile hook and optional data\n"
   printf "ll/la/l/lt    Smart listing via eza when available\n"
   printf "cat/catp      Pretty file reading via bat when available\n"
@@ -1621,6 +1622,50 @@ myhelp() {
 reloadp() {
   . "$SHELL_ALIAS_TOOLS_HOME/shell-tools.sh"
   echo "Profile runtime reloaded."
+}
+
+shelldeck-update() {
+  local ref="${SHELLDECK_UPDATE_REF:-main}"
+  local runtime="$SHELL_ALIAS_TOOLS_HOME/shell-tools.sh"
+  local url="https://raw.githubusercontent.com/adrienclaire/ShellDeck/$ref/shell-tools.sh"
+  local tmp="${runtime}.update.$$"
+  local backup="${runtime}.bak.$(date +%Y%m%d%H%M%S)"
+
+  shell-tools-ensure-home
+  printf "%sUpdating ShellDeck runtime from %s...%s\n" "$ST_CYAN" "$ref" "$ST_RESET"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$tmp" || {
+      rm -f "$tmp"
+      echo "ShellDeck update download failed." >&2
+      return 1
+    }
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$tmp" "$url" || {
+      rm -f "$tmp"
+      echo "ShellDeck update download failed." >&2
+      return 1
+    }
+  else
+    echo "ShellDeck update requires curl or wget." >&2
+    return 1
+  fi
+
+  if ! bash -n "$tmp"; then
+    rm -f "$tmp"
+    echo "Downloaded ShellDeck runtime failed syntax validation; current installation was not changed." >&2
+    return 1
+  fi
+
+  [ ! -f "$runtime" ] || cp "$runtime" "$backup"
+  mv "$tmp" "$runtime"
+  chmod 644 "$runtime"
+
+  # shellcheck disable=SC1090
+  . "$runtime"
+  printf "%sShellDeck updated successfully.%s\n" "$ST_GREEN" "$ST_RESET"
+  printf "User data preserved: aliases, config, infra hosts, and SSH config.\n"
+  [ ! -f "$backup" ] || printf "Runtime backup: %s\n" "$backup"
 }
 
 shell-tools-dashboard() {

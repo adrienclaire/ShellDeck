@@ -29,6 +29,7 @@ jobs:
           bash tests/test-installer-ui.sh
           bash tests/test-ssh-mfa-config.sh
           bash tests/test-init-docker-scan.sh
+          bash tests/test-shell-update.sh
       - name: Run workstation onboarding integration flow
         if: matrix.os == 'ubuntu-latest'
         run: bash tests/integration-workstation-flow.sh
@@ -67,6 +68,9 @@ jobs:
             }
           }
           if ($failed) { exit 1 }
+      - name: Run PowerShell regression tests
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/test-powershell-dashboard-cache.ps1
       - name: PSScriptAnalyzer errors
         shell: pwsh
         run: |

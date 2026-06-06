@@ -11,6 +11,12 @@ else {
 $script:AliasToolsPath = Join-Path $script:ShellToolsRoot "aliases.ps1"
 $script:InfraHostsPath = Join-Path $script:ShellToolsRoot "infra-hosts.csv"
 $script:ShellDeckConfigPath = Join-Path $script:ShellToolsRoot "config"
+$script:ShellDeckDashboardCachePath = if ($env:SHELLDECK_DASHBOARD_CACHE_FILE) {
+    $env:SHELLDECK_DASHBOARD_CACHE_FILE
+}
+else {
+    Join-Path $script:ShellToolsRoot "dashboard-cache.json"
+}
 
 function ConvertTo-ShellDeckMachineProfile {
     param([string]$Value)
@@ -312,13 +318,28 @@ function Read-ShellToolsServices {
 
 function Get-PrimaryIPv4 {
     try {
-        $ip = Get-NetIPConfiguration |
-            Where-Object { $_.IPv4DefaultGateway -ne $null -and $_.IPv4Address.IPAddress -notlike "169.254.*" } |
-            Select-Object -First 1 |
-            ForEach-Object { $_.IPv4Address.IPAddress }
+        $interfaces = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+            Where-Object {
+                $_.OperationalStatus -eq [System.Net.NetworkInformation.OperationalStatus]::Up -and
+                $_.NetworkInterfaceType -ne [System.Net.NetworkInformation.NetworkInterfaceType]::Loopback
+            }
 
-        if ($ip) {
-            return $ip
+        foreach ($networkInterface in $interfaces) {
+            $properties = $networkInterface.GetIPProperties()
+            if (@($properties.GatewayAddresses | Where-Object { $_.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork }).Count -eq 0) {
+                continue
+            }
+
+            $address = $properties.UnicastAddresses |
+                Where-Object {
+                    $_.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and
+                    $_.Address.IPAddressToString -notlike "169.254.*"
+                } |
+                Select-Object -First 1
+
+            if ($address) {
+                return $address.Address.IPAddressToString
+            }
         }
     }
     catch {
@@ -990,6 +1011,112 @@ function Get-ShellToolsSmartToolSummary {
     return ("{0}/{1}" -f $installed, $tools.Count)
 }
 
+function New-ShellDeckDashboardSnapshot {
+    return [PSCustomObject]@{
+        CacheVersion = 1
+        RefreshedDate = (Get-Date).ToString("yyyy-MM-dd")
+        RefreshedAt   = (Get-Date).ToString("o")
+        IP            = Get-PrimaryIPv4
+        Uptime        = Get-ShortUptime
+        Disk          = Get-ShellToolsDiskSummary
+        InfraHosts    = if (Test-ShellDeckControlProfile) { @(Get-InfraHosts).Count } else { 0 }
+        SmartTools    = Get-ShellToolsSmartToolSummary
+    }
+}
+
+function Save-ShellDeckDashboardSnapshot {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Snapshot
+    )
+
+    try {
+        Ensure-ShellToolsHome
+        $tempPath = "{0}.{1}.tmp" -f $script:ShellDeckDashboardCachePath, $PID
+        $Snapshot | ConvertTo-Json | Set-Content -Path $tempPath -Encoding UTF8
+        Move-Item -Path $tempPath -Destination $script:ShellDeckDashboardCachePath -Force
+    }
+    catch {
+        if ($tempPath) {
+            Remove-Item -Path $tempPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-ShellDeckDashboardSnapshot {
+    param([switch]$ForceRefresh)
+
+    $today = (Get-Date).ToString("yyyy-MM-dd")
+
+    if (-not $ForceRefresh -and (Test-Path $script:ShellDeckDashboardCachePath)) {
+        try {
+            $cached = Get-Content -Path $script:ShellDeckDashboardCachePath -Raw -ErrorAction Stop |
+                ConvertFrom-Json -ErrorAction Stop
+
+            if ($cached.CacheVersion -eq 1 -and $cached.RefreshedDate -eq $today) {
+                return $cached
+            }
+        }
+        catch {
+            # A missing or invalid cache is rebuilt below.
+        }
+    }
+
+    $snapshot = New-ShellDeckDashboardSnapshot
+    Save-ShellDeckDashboardSnapshot -Snapshot $snapshot
+    return $snapshot
+}
+
+function shelldeck-refresh {
+    $snapshot = Get-ShellDeckDashboardSnapshot -ForceRefresh
+    Write-Host ("ShellDeck dashboard cache refreshed: {0}" -f $snapshot.RefreshedAt) -ForegroundColor Green
+    Write-Host ("IP: {0} | Uptime: {1} | Disk: {2} | Smart tools: {3}" -f $snapshot.IP, $snapshot.Uptime, $snapshot.Disk, $snapshot.SmartTools)
+}
+
+function shelldeck-update {
+    $ref = if ($env:SHELLDECK_UPDATE_REF) { $env:SHELLDECK_UPDATE_REF } else { "main" }
+    $runtimePath = Join-Path $script:ShellToolsRoot "shell-tools.ps1"
+    $downloadPath = "{0}.update.{1}" -f $runtimePath, $PID
+    $backupPath = "{0}.bak.{1}" -f $runtimePath, (Get-Date -Format "yyyyMMddHHmmss")
+    $url = "https://raw.githubusercontent.com/adrienclaire/ShellDeck/$ref/alias-tools.ps1"
+
+    Write-Host ("Updating ShellDeck runtime from {0}..." -f $ref) -ForegroundColor Cyan
+
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $downloadPath -ErrorAction Stop
+
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile(
+            $downloadPath,
+            [ref]$tokens,
+            [ref]$parseErrors
+        ) | Out-Null
+
+        if ($parseErrors) {
+            throw "Downloaded PowerShell runtime failed syntax validation."
+        }
+
+        if (Test-Path $runtimePath) {
+            Copy-Item -Path $runtimePath -Destination $backupPath -Force
+        }
+
+        Move-Item -Path $downloadPath -Destination $runtimePath -Force
+        . $runtimePath
+
+        Write-Host "ShellDeck updated successfully." -ForegroundColor Green
+        Write-Host "User data preserved: aliases, config, infra hosts, dashboard cache, and SSH config."
+        if (Test-Path $backupPath) {
+            Write-Host ("Runtime backup: {0}" -f $backupPath) -ForegroundColor DarkGray
+        }
+    }
+    catch {
+        Remove-Item -Path $downloadPath -Force -ErrorAction SilentlyContinue
+        Write-Host ("ShellDeck update failed: {0}" -f $_.Exception.Message) -ForegroundColor Red
+        Write-Host "The current installation and user data were not changed." -ForegroundColor Yellow
+    }
+}
+
 function Edit-Profile {
     if (Get-Command cursor -ErrorAction SilentlyContinue) {
         cursor $PROFILE
@@ -1368,12 +1495,13 @@ function Show-ShellDashboard {
         return
     }
 
-    $ip = Get-PrimaryIPv4
+    $snapshot = Get-ShellDeckDashboardSnapshot
+    $ip = $snapshot.IP
     $profileLabel = Get-ShellDeckMachineProfileLabel
-    $hostCount = if (Test-ShellDeckControlProfile) { @(Get-InfraHosts).Count } else { 0 }
-    $uptime = Get-ShortUptime
-    $disk = Get-ShellToolsDiskSummary
-    $toolSummary = Get-ShellToolsSmartToolSummary
+    $hostCount = $snapshot.InfraHosts
+    $uptime = $snapshot.Uptime
+    $disk = $snapshot.Disk
+    $toolSummary = $snapshot.SmartTools
 
     Write-Host ""
     Write-Host ("=" * 58) -ForegroundColor DarkGray
@@ -1412,6 +1540,8 @@ function myhelp {
         Write-Host "sshhosts      Pick an SSH host and connect"
     }
     Write-Host "check-tools   Check local CLI dependencies"
+    Write-Host "shelldeck-refresh Refresh cached dashboard information"
+    Write-Host "shelldeck-update Update runtime and preserve user data"
     Write-Host "shelluninstall Remove profile hook and optional data"
     Write-Host "ll/la/l/lt    Smart listing via eza when available"
     Write-Host "cat/catp      Pretty file reading via bat when available"

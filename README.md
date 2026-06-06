@@ -85,9 +85,40 @@ Available in both profiles:
 
 ```text
 check-tools   Check local CLI dependencies
+shelldeck-refresh Refresh the daily PowerShell dashboard cache
+shelldeck-update Update ShellDeck while preserving aliases and infra data
 shelluninstall Remove profile hook and optionally delete local data
 myhelp        Show all commands
 ```
+
+## Updating
+
+You do not need to uninstall ShellDeck before updating. Run:
+
+```text
+shelldeck-update
+```
+
+The updater downloads and validates the runtime from `main`, backs up the installed runtime, replaces only that runtime file, and reloads it. It preserves:
+
+- infra hosts and services
+- custom aliases and functions
+- machine profile configuration
+- dashboard cache
+- SSH config and keys
+
+To update from a specific release tag or branch:
+
+```bash
+SHELLDECK_UPDATE_REF=v0.2.0 shelldeck-update
+```
+
+```powershell
+$env:SHELLDECK_UPDATE_REF = "v0.2.0"
+shelldeck-update
+```
+
+Rerunning the installer also preserves existing aliases and infra data. During uninstall, answer no when asked whether to delete the ShellDeck data directory if you intend to reinstall later.
 
 Alias helpers:
 
