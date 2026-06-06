@@ -21,29 +21,29 @@ ShellDeck installs a profile runtime that upgrades your terminal startup, keeps 
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.1/install.ps1 -OutFile install.ps1
 .\install.ps1
 ```
 
 ### Linux
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.1/install.sh
 bash install.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.1/install.sh
 bash install.sh
 ```
 
 To verify checksums first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.1/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.1/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```
@@ -110,11 +110,11 @@ The updater downloads and validates the runtime from `main`, backs up the instal
 To update from a specific release tag or branch:
 
 ```bash
-SHELLDECK_UPDATE_REF=v0.2.0 shelldeck-update
+SHELLDECK_UPDATE_REF=v0.2.1 shelldeck-update
 ```
 
 ```powershell
-$env:SHELLDECK_UPDATE_REF = "v0.2.0"
+$env:SHELLDECK_UPDATE_REF = "v0.2.1"
 shelldeck-update
 ```
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-06-06
+
+- Added `shelldeck-update` for Bash/Zsh and PowerShell so ShellDeck can update the runtime in place without deleting infra hosts, aliases, config, or SSH data.
+- Added a timestamped runtime backup during in-place updates plus syntax validation before replacement.
+- Added a daily PowerShell dashboard cache and `shelldeck-refresh` to reduce repeated startup cost across sessions.
+- Replaced the slow PowerShell IP lookup path with a faster .NET network-interface query.
+- Fixed `init` skipping hosts that appear after a Docker-enabled host by preventing SSH-based Docker scans from consuming the infra CSV loop input.
+- Added regression coverage for PowerShell dashboard caching, updater safety, and the Docker-scan stdin bug.
+
 ## 0.2.0 - 2026-05-20
 
 - Added optional Gum-powered installer UI for richer choices, confirmations, inputs, and styled installer sections.
