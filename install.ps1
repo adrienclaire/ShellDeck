@@ -14,7 +14,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ShellToolsVersion = if ($env:SHELL_TOOLS_VERSION) { $env:SHELL_TOOLS_VERSION } else { "0.2.2" }
+$ShellToolsVersion = if ($env:SHELL_TOOLS_VERSION) { $env:SHELL_TOOLS_VERSION } else { "0.2.3" }
 $ShellAliasToolsRef = if ($env:SHELL_ALIAS_TOOLS_REF) { $env:SHELL_ALIAS_TOOLS_REF } else { "v$ShellToolsVersion" }
 $RawBase = if ($env:SHELL_ALIAS_TOOLS_RAW_BASE) {
     $env:SHELL_ALIAS_TOOLS_RAW_BASE
@@ -251,6 +251,13 @@ function Get-InstallToolPath {
 
     switch ($Tool) {
         "bash-completion" { return "PowerShell completion" }
+        "coreutils" {
+            $cmd = Get-Command coreutils -CommandType Application -ErrorAction SilentlyContinue
+            if (-not $cmd) { $cmd = Get-Command ls.exe -CommandType Application -ErrorAction SilentlyContinue }
+            if (-not $cmd) { $cmd = Get-Command cp.exe -CommandType Application -ErrorAction SilentlyContinue }
+            if ($cmd) { return $cmd.Source }
+            return ""
+        }
         "bat" {
             $cmd = Get-Command bat -ErrorAction SilentlyContinue
             if (-not $cmd) { $cmd = Get-Command batcat -ErrorAction SilentlyContinue }
@@ -404,6 +411,7 @@ function Install-WindowsDependency {
     $wingetPackages = @{
         git       = "Git.Git"
         wget      = "GNU.Wget2"
+        coreutils = "Microsoft.Coreutils"
         gum       = "Charmbracelet.gum"
         fzf       = "junegunn.fzf"
         bat       = "sharkdp.bat"
@@ -476,7 +484,7 @@ function Install-Dependencies {
     param([string]$SetupMode)
 
     $requiredTools = @(
-        "git", "ssh", "curl", "wget", "gum", "fzf", "bash-completion", "bat", "eza", "zoxide",
+        "git", "ssh", "curl", "wget", "coreutils", "gum", "fzf", "bash-completion", "bat", "eza", "zoxide",
         "starship", "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
         "btop", "htop", "duf", "neovim"
     )

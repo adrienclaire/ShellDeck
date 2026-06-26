@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.3 - 2026-06-26
+
+- Added Microsoft Coreutils as a required Windows smart-shell dependency through `winget install Microsoft.Coreutils`.
+
 ## 0.2.2 - 2026-06-26
 
 - Added persistent PowerShell startup banner controls: `shelldeckinfo-enabled`, `shelldeckinfo-disabled`, and `shelldeckinfo-status`.

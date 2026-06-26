@@ -14,6 +14,7 @@ function Assert-True {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $runtimePath = Join-Path $repoRoot "alias-tools.ps1"
 $runtimeText = Get-Content -Path $runtimePath -Raw
+$installText = Get-Content -Path (Join-Path $repoRoot "install.ps1") -Raw
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("shelldeck-cache-test-" + [guid]::NewGuid())
 
 try {
@@ -32,6 +33,10 @@ try {
     Assert-True ($null -ne (Get-Command shelldeckinfo-disabled -ErrorAction SilentlyContinue)) "shelldeckinfo-disabled command must exist"
     Assert-True ($null -ne (Get-Command shelldeckinfo-status -ErrorAction SilentlyContinue)) "shelldeckinfo-status command must exist"
     Assert-True ($runtimeText -match "infra-hosts\.csv") "runtime update must keep infra data outside the replaced runtime file"
+    Assert-True ($installText -match 'coreutils\s*=\s*"Microsoft\.Coreutils"') "PowerShell installer must map coreutils to Microsoft.Coreutils"
+    Assert-True ($installText -match '"coreutils"') "PowerShell installer required tool list must include coreutils"
+    Assert-True ($runtimeText -match '"coreutils"') "PowerShell runtime smart tool list must include coreutils"
+    Assert-True ($runtimeText -match 'Get-Command ls\.exe -CommandType Application') "Coreutils detection must look for executable tools, not PowerShell aliases"
 
     $script:refreshCount = 0
     function script:New-ShellDeckDashboardSnapshot {

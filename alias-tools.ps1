@@ -441,6 +441,13 @@ function Get-ShellToolsToolPath {
 
     switch ($Tool) {
         "bash-completion" { return "PowerShell completion" }
+        "coreutils" {
+            $cmd = Get-Command coreutils -CommandType Application -ErrorAction SilentlyContinue
+            if (-not $cmd) { $cmd = Get-Command ls.exe -CommandType Application -ErrorAction SilentlyContinue }
+            if (-not $cmd) { $cmd = Get-Command cp.exe -CommandType Application -ErrorAction SilentlyContinue }
+            if ($cmd) { return $cmd.Source }
+            return ""
+        }
         "bat" {
             $cmd = Get-Command bat -ErrorAction SilentlyContinue
             if (-not $cmd) { $cmd = Get-Command batcat -ErrorAction SilentlyContinue }
@@ -495,7 +502,7 @@ function Get-ShellToolsToolPath {
 
 function Get-ShellToolsSmartToolList {
     return @(
-        "git", "ssh", "curl", "wget", "fzf", "bash-completion", "bat", "eza", "zoxide",
+        "git", "ssh", "curl", "wget", "coreutils", "fzf", "bash-completion", "bat", "eza", "zoxide",
         "starship", "ripgrep", "fd", "jq", "yq", "nc", "tree", "unzip", "zip", "rsync", "tmux",
         "btop", "htop", "duf", "neovim", "gh", "docker", "multipass"
     )
