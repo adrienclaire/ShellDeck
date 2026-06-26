@@ -18,6 +18,64 @@ else {
     Join-Path $script:ShellToolsRoot "dashboard-cache.json"
 }
 
+function Get-ShellDeckConfigValue {
+    param([Parameter(Mandatory = $true)][string]$Key)
+
+    if (-not (Test-Path $script:ShellDeckConfigPath)) {
+        return ""
+    }
+
+    foreach ($line in Get-Content -Path $script:ShellDeckConfigPath -ErrorAction SilentlyContinue) {
+        if ($line -match ('^\s*{0}\s*=\s*"?([^"\r\n]+)"?\s*$' -f [regex]::Escape($Key))) {
+            return $matches[1].Trim()
+        }
+    }
+
+    return ""
+}
+
+function Set-ShellDeckConfigValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $true)][string]$Value
+    )
+
+    if (-not (Test-Path $script:ShellToolsRoot)) {
+        New-Item -ItemType Directory -Force -Path $script:ShellToolsRoot | Out-Null
+    }
+
+    $lines = @()
+    if (Test-Path $script:ShellDeckConfigPath) {
+        $lines = @(Get-Content -Path $script:ShellDeckConfigPath -ErrorAction SilentlyContinue)
+    }
+
+    $updated = $false
+    $nextLines = @($lines | ForEach-Object {
+        if ($_ -match ('^\s*{0}\s*=' -f [regex]::Escape($Key))) {
+            $updated = $true
+            "{0}={1}" -f $Key, $Value
+        }
+        else {
+            $_
+        }
+    })
+
+    if (-not $updated) {
+        $nextLines += "{0}={1}" -f $Key, $Value
+    }
+
+    $nextLines | Set-Content -Path $script:ShellDeckConfigPath -Encoding UTF8
+}
+
+function Test-ShellDeckDashboardEnabled {
+    if ($env:SHELL_TOOLS_NO_DASHBOARD -eq "1") {
+        return $false
+    }
+
+    $configured = (Get-ShellDeckConfigValue "SHELLDECK_SHOW_DASHBOARD").ToLowerInvariant()
+    return ($configured -notin @("0", "false", "no", "off", "disabled"))
+}
+
 function ConvertTo-ShellDeckMachineProfile {
     param([string]$Value)
 
@@ -1067,6 +1125,25 @@ function Get-ShellDeckDashboardSnapshot {
     return $snapshot
 }
 
+function shelldeckinfo-enabled {
+    Set-ShellDeckConfigValue -Key "SHELLDECK_SHOW_DASHBOARD" -Value "true"
+    Write-Host "ShellDeck startup banner enabled. Restart PowerShell or run reloadp." -ForegroundColor Green
+}
+
+function shelldeckinfo-disabled {
+    Set-ShellDeckConfigValue -Key "SHELLDECK_SHOW_DASHBOARD" -Value "false"
+    Write-Host "ShellDeck startup banner disabled. Commands remain available." -ForegroundColor Yellow
+}
+
+function shelldeckinfo-status {
+    if (Test-ShellDeckDashboardEnabled) {
+        Write-Host "ShellDeck startup banner is enabled." -ForegroundColor Green
+    }
+    else {
+        Write-Host "ShellDeck startup banner is disabled." -ForegroundColor Yellow
+    }
+}
+
 function shelldeck-refresh {
     $snapshot = Get-ShellDeckDashboardSnapshot -ForceRefresh
     Write-Host ("ShellDeck dashboard cache refreshed: {0}" -f $snapshot.RefreshedAt) -ForegroundColor Green
@@ -1491,7 +1568,7 @@ function gd {
 }
 
 function Show-ShellDashboard {
-    if ($env:SHELL_TOOLS_NO_DASHBOARD -eq "1") {
+    if (-not (Test-ShellDeckDashboardEnabled)) {
         return
     }
 
@@ -1540,6 +1617,9 @@ function myhelp {
         Write-Host "sshhosts      Pick an SSH host and connect"
     }
     Write-Host "check-tools   Check local CLI dependencies"
+    Write-Host "shelldeckinfo-enabled Enable startup banner"
+    Write-Host "shelldeckinfo-disabled Disable startup banner"
+    Write-Host "shelldeckinfo-status Show startup banner setting"
     Write-Host "shelldeck-refresh Refresh cached dashboard information"
     Write-Host "shelldeck-update Update runtime and preserve user data"
     Write-Host "shelluninstall Remove profile hook and optional data"

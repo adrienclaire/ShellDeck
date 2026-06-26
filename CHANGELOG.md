@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.2 - 2026-06-26
+
+- Added persistent PowerShell startup banner controls: `shelldeckinfo-enabled`, `shelldeckinfo-disabled`, and `shelldeckinfo-status`.
+- Disabled startup banners are saved in ShellDeck config so future PowerShell profile loads remain quiet while commands stay available.
+- Kept `SHELL_TOOLS_NO_DASHBOARD=1` as an environment override for one-off automated sessions.
+- Added regression coverage for disabled banner profile loads.
+
 ## 0.2.1 - 2026-06-06
 
 - Added `shelldeck-update` for Bash/Zsh and PowerShell so ShellDeck can update the runtime in place without deleting infra hosts, aliases, config, or SSH data.

@@ -28,6 +28,9 @@ try {
     Assert-True ($runtimeText -notmatch "Get-NetIPConfiguration") "fast IP lookup must not load Get-NetIPConfiguration"
     Assert-True ($null -ne (Get-Command shelldeck-refresh -ErrorAction SilentlyContinue)) "shelldeck-refresh command must exist"
     Assert-True ($null -ne (Get-Command shelldeck-update -ErrorAction SilentlyContinue)) "shelldeck-update command must exist"
+    Assert-True ($null -ne (Get-Command shelldeckinfo-enabled -ErrorAction SilentlyContinue)) "shelldeckinfo-enabled command must exist"
+    Assert-True ($null -ne (Get-Command shelldeckinfo-disabled -ErrorAction SilentlyContinue)) "shelldeckinfo-disabled command must exist"
+    Assert-True ($null -ne (Get-Command shelldeckinfo-status -ErrorAction SilentlyContinue)) "shelldeckinfo-status command must exist"
     Assert-True ($runtimeText -match "infra-hosts\.csv") "runtime update must keep infra data outside the replaced runtime file"
 
     $script:refreshCount = 0
@@ -58,6 +61,29 @@ try {
     $recovered = Get-ShellDeckDashboardSnapshot
     Assert-True ($script:refreshCount -eq 3) "invalid cache data must trigger a refresh"
     Assert-True ($recovered.IP -eq "192.0.2.3") "invalid cache recovery must return refreshed data"
+
+
+    Remove-Item Env:SHELL_TOOLS_NO_DASHBOARD -ErrorAction SilentlyContinue
+    shelldeckinfo-disabled | Out-Null
+    Assert-True (-not (Test-ShellDeckDashboardEnabled)) "disabled startup banner config must suppress the dashboard"
+    Assert-True ((Get-Content -Path (Join-Path $tempRoot "config") -Raw) -match "SHELLDECK_SHOW_DASHBOARD=false") "disabled startup banner setting must persist to config"
+
+    $disabledRoot = Join-Path $tempRoot "disabled-load"
+    New-Item -ItemType Directory -Force -Path $disabledRoot | Out-Null
+    Set-Content -Path (Join-Path $disabledRoot "config") -Value "SHELLDECK_SHOW_DASHBOARD=false" -Encoding UTF8
+    $loadScript = Join-Path $tempRoot "load-disabled.ps1"
+    @"
+`$env:SHELL_ALIAS_TOOLS_HOME = '$disabledRoot'
+`$env:SHELLDECK_DASHBOARD_CACHE_FILE = '$(Join-Path $disabledRoot "dashboard-cache.json")'
+`$env:SHELL_TOOLS_NO_PROMPT = '1'
+. '$runtimePath'
+"@ | Set-Content -Path $loadScript -Encoding UTF8
+    $loadOutput = & pwsh -NoProfile -File $loadScript | Out-String
+    Assert-True ($loadOutput -notmatch "ShellDeck ready") "disabled startup banner must not print during profile load"
+
+    shelldeckinfo-enabled | Out-Null
+    Assert-True (Test-ShellDeckDashboardEnabled) "enabled startup banner config must allow the dashboard"
+    Assert-True ((Get-Content -Path (Join-Path $tempRoot "config") -Raw) -match "SHELLDECK_SHOW_DASHBOARD=true") "enabled startup banner setting must persist to config"
 
     Write-Host "PowerShell dashboard cache regression checks passed"
 }

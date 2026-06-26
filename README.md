@@ -21,29 +21,29 @@ ShellDeck installs a profile runtime that upgrades your terminal startup, keeps 
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.1/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.2/install.ps1 -OutFile install.ps1
 .\install.ps1
 ```
 
 ### Linux
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.1/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.2/install.sh
 bash install.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.1/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.2/install.sh
 bash install.sh
 ```
 
 To verify checksums first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.1/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.1/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.2/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.2/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```
@@ -85,11 +85,36 @@ Available in both profiles:
 
 ```text
 check-tools   Check local CLI dependencies
+shelldeckinfo-disabled Disable automatic PowerShell startup banner
+shelldeckinfo-enabled Enable automatic PowerShell startup banner
+shelldeckinfo-status Show startup banner setting
 shelldeck-refresh Refresh the daily PowerShell dashboard cache
 shelldeck-update Update ShellDeck while preserving aliases and infra data
 shelluninstall Remove profile hook and optionally delete local data
 myhelp        Show all commands
 ```
+
+## PowerShell Startup Banner
+
+ShellDeck can print a compact environment banner when PowerShell loads your profile. For long-running workstation use, automation, or AI agents that launch PowerShell often, you can disable that automatic banner while keeping all commands available:
+
+```powershell
+shelldeckinfo-disabled
+```
+
+Re-enable it later with:
+
+```powershell
+shelldeckinfo-enabled
+```
+
+Check the current setting with:
+
+```powershell
+shelldeckinfo-status
+```
+
+The setting is persisted in `~/.shell-alias-tools/config`. For a single process, `SHELL_TOOLS_NO_DASHBOARD=1` still suppresses the banner without changing the saved setting.
 
 ## Updating
 
@@ -110,11 +135,11 @@ The updater downloads and validates the runtime from `main`, backs up the instal
 To update from a specific release tag or branch:
 
 ```bash
-SHELLDECK_UPDATE_REF=v0.2.1 shelldeck-update
+SHELLDECK_UPDATE_REF=v0.2.2 shelldeck-update
 ```
 
 ```powershell
-$env:SHELLDECK_UPDATE_REF = "v0.2.1"
+$env:SHELLDECK_UPDATE_REF = "v0.2.2"
 shelldeck-update
 ```
 
