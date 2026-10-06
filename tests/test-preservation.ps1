@@ -79,10 +79,10 @@ try {
 
     Set-ShellDeckConfigValue -Key SHELLDECK_MACHINE_PROFILE -Value control
     . $runtime
-    Assert-Preserved ($null -ne (Get-Command init -ErrorAction SilentlyContinue)) "control profile lacks init"
+    Assert-Preserved ($null -ne (Get-Command init -CommandType Function -ErrorAction SilentlyContinue)) "control profile lacks init"
     Set-ShellDeckConfigValue -Key SHELLDECK_MACHINE_PROFILE -Value workstation
     . $runtime
-    Assert-Preserved ($null -eq (Get-Command init -ErrorAction SilentlyContinue)) "workstation kept owned init"
+    Assert-Preserved ($null -eq (Get-Command init -CommandType Function -ErrorAction SilentlyContinue)) "workstation kept owned init"
     Assert-Preserved ((infra-list) -eq "user-infra") "profile change removed a user function"
 
     function Read-ShellToolsYesNo { param($Prompt, $Default); return $Default }

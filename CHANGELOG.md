@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed the workstation profile test to distinguish ShellDeck's `init` function from Linux's native `init` executable.
+
 ## 0.2.5 - 2026-10-06
 
 - Fixed the PowerShell preservation test on Linux by checking the actual initial alias state rather than assuming the Windows `cat` alias exists.
