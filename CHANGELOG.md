@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.6 - 2026-10-06
+
 - Fixed the workstation profile test to distinguish ShellDeck's `init` function from Linux's native `init` executable.
 
 ## 0.2.5 - 2026-10-06
