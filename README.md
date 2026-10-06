@@ -102,34 +102,34 @@ These refreshes let the installer find newly installed commands; they do not con
 
 ## Install
 
-The download commands below use the `v0.2.7` release. Local installs use the bundled runtime.
+The download commands below use the `v0.2.8` release. Local installs use the bundled runtime.
 
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.7/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.8/install.ps1 -OutFile install.ps1
 .\install.ps1
 ```
 
 ### Linux
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.7/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.8/install.sh
 bash install.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.7/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.8/install.sh
 bash install.sh
 ```
 
 To verify checksums first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.7/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.7/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.8/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.8/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```
@@ -221,11 +221,11 @@ The updater downloads and validates the runtime from `main`, backs up the instal
 To update from a specific release tag or branch:
 
 ```bash
-SHELLDECK_UPDATE_REF=v0.2.7 shelldeck-update
+SHELLDECK_UPDATE_REF=v0.2.8 shelldeck-update
 ```
 
 ```powershell
-$env:SHELLDECK_UPDATE_REF = "v0.2.7"
+$env:SHELLDECK_UPDATE_REF = "v0.2.8"
 shelldeck-update
 ```
 
