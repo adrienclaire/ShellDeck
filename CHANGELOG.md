@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.5 - 2026-10-06
+
+- Fixed the PowerShell preservation test on Linux by checking the actual initial alias state rather than assuming the Windows `cat` alias exists.
+
 ## 0.2.4 - 2026-10-06
 
 - Reorganized the README around bootstrap scope, dotfiles coexistence, dry-run, installed files, update preservation, and uninstall limits.

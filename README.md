@@ -84,7 +84,7 @@ alias ll='ls -la'
 gs() { git status --short; }
 ```
 
-PowerShell aliases retain normal precedence over functions, including built-in `cat` for `Get-Content`. Use `catp` for the bat helper, or explicitly override `cat` in your user file. ShellDeck does not remove your aliases to force its defaults into use.
+PowerShell aliases retain normal precedence over functions, including Windows' built-in `cat` for `Get-Content`. Use `catp` for the bat helper, or explicitly override `cat` in your user file. ShellDeck does not remove your aliases to force its defaults into use.
 
 ## PATH handling
 
@@ -102,34 +102,34 @@ These refreshes let the installer find newly installed commands; they do not con
 
 ## Install
 
-The download commands below use the `v0.2.4` release. Local installs use the bundled runtime.
+The download commands below use the `v0.2.5` release. Local installs use the bundled runtime.
 
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.5/install.ps1 -OutFile install.ps1
 .\install.ps1
 ```
 
 ### Linux
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.5/install.sh
 bash install.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.5/install.sh
 bash install.sh
 ```
 
 To verify checksums first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.5/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.5/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```
@@ -221,11 +221,11 @@ The updater downloads and validates the runtime from `main`, backs up the instal
 To update from a specific release tag or branch:
 
 ```bash
-SHELLDECK_UPDATE_REF=v0.2.4 shelldeck-update
+SHELLDECK_UPDATE_REF=v0.2.5 shelldeck-update
 ```
 
 ```powershell
-$env:SHELLDECK_UPDATE_REF = "v0.2.4"
+$env:SHELLDECK_UPDATE_REF = "v0.2.5"
 shelldeck-update
 ```
 

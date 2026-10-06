@@ -9,6 +9,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("shelldeck-preservation-" + [guid]::NewGuid())
 $originalProfile = $PROFILE
 $originalPath = $env:PATH
+$originalCatAlias = Get-Alias cat -ErrorAction SilentlyContinue
 try {
     New-Item -ItemType Directory -Path $testRoot | Out-Null
     $env:SHELL_ALIAS_TOOLS_HOME = Join-Path $testRoot "data"
@@ -53,7 +54,13 @@ try {
     Assert-Preserved ((infra-list) -eq "user-infra") "workstation removed user infra command"
     Assert-Preserved ((Get-Alias gp).Definition -eq "Get-Location") "caller alias removed"
     Assert-Preserved ((Get-Alias gs).Definition -eq "Get-Location") "user file alias removed"
-    Assert-Preserved ((Get-Alias cat).Definition -eq "Get-Content") "built-in alias removed"
+    $loadedCatAlias = Get-Alias cat -ErrorAction SilentlyContinue
+    if ($originalCatAlias) {
+        Assert-Preserved ($loadedCatAlias.Definition -eq $originalCatAlias.Definition) "existing cat alias changed"
+    }
+    else {
+        Assert-Preserved ($null -eq $loadedCatAlias) "runtime imposed a cat alias"
+    }
 
     $beforeUpdate = (Get-FileHash $configFile).Hash
     $script:testUpdateContent = (Get-Content $runtime -Raw).Replace('docker ps', 'docker ps --all')
