@@ -80,6 +80,13 @@ jobs:
       - name: Verify PowerShell preservation
         shell: pwsh
         run: pwsh -NoProfile -File tests/test-preservation.ps1
+      - name: Verify PowerShell installer UI bootstrap
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/test-powershell-installer-ui.ps1
+      - name: Verify Windows PowerShell 5.1 installer UI bootstrap
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: powershell -NoProfile -File tests/test-powershell-installer-ui.ps1
       - name: PSScriptAnalyzer errors
         shell: pwsh
         run: |

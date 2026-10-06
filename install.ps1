@@ -463,7 +463,7 @@ function Install-WindowsDependency {
         git       = "Git.Git"
         wget      = "GNU.Wget2"
         coreutils = "Microsoft.Coreutils"
-        gum       = "Charmbracelet.gum"
+        gum       = "charmbracelet.gum"
         fzf       = "junegunn.fzf"
         bat       = "sharkdp.bat"
         eza       = "eza-community.eza"
@@ -726,13 +726,27 @@ function Initialize-InstallerUi {
     }
 
     try {
-        winget install --id Charmbracelet.gum -e --accept-package-agreements --accept-source-agreements | Out-Host
+        winget install --id charmbracelet.gum --exact --source winget --accept-package-agreements --accept-source-agreements | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "Gum install failed (winget exit code $LASTEXITCODE). Refreshing the winget source and retrying once."
+            winget source update --name winget | Out-Host
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "Could not refresh the winget source. Continuing with the classic installer UI."
+                return
+            }
+            winget install --id charmbracelet.gum --exact --source winget --accept-package-agreements --accept-source-agreements | Out-Host
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "Gum install failed again (winget exit code $LASTEXITCODE). Continuing with the classic installer UI."
+                return
+            }
+        }
     }
     catch {
         Write-Warn "Gum install failed. Continuing with the classic installer UI."
+        return
     }
 
-    Update-GumPath
+    Refresh-InstallerSessionPath
     if (Get-Command gum -ErrorAction SilentlyContinue) {
         $script:UseGum = $true
         Restart-InstallerWithGumIfPossible

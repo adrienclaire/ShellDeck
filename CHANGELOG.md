@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed the Windows Gum bootstrap calling the removed `Update-GumPath` helper.
+- Corrected the case-sensitive winget Gum package ID to `charmbracelet.gum`, selected the winget source explicitly, and added a single source-refresh retry on native install failure.
+- Kept classic UI usable when Gum installation/source refresh fails, with regression coverage on PowerShell 7 and Windows PowerShell 5.1.
+
 ## 0.2.6 - 2026-10-06
 
 - Fixed the workstation profile test to distinguish ShellDeck's `init` function from Linux's native `init` executable.
