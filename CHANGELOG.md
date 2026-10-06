@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed PowerShell Gum relaunch argument binding by splatting named parameters instead of positional argument strings.
+- Kept Gum status/banner output out of machine-profile and setup-mode return values.
+- Added real child-script relaunch regression tests on PowerShell 7 and Windows PowerShell 5.1, preserving flags, empty selections, and install paths with spaces/apostrophes.
+
 ## 0.2.7 - 2026-10-06
 
 - Fixed the Windows Gum bootstrap calling the removed `Update-GumPath` helper.

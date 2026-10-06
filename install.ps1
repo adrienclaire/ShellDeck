@@ -78,7 +78,7 @@ function Test-GumUi {
 function Write-Step {
     param([string]$Message)
     if (Test-GumUi) {
-        & gum style --foreground 39 --bold $Message
+        & gum style --foreground 39 --bold $Message | Out-Host
     }
     else {
         Write-Host $Message -ForegroundColor Cyan
@@ -88,7 +88,7 @@ function Write-Step {
 function Write-Ok {
     param([string]$Message)
     if (Test-GumUi) {
-        & gum style --foreground 42 --bold $Message
+        & gum style --foreground 42 --bold $Message | Out-Host
     }
     else {
         Write-Host $Message -ForegroundColor Green
@@ -98,7 +98,7 @@ function Write-Ok {
 function Write-Warn {
     param([string]$Message)
     if (Test-GumUi) {
-        & gum style --foreground 214 --bold $Message
+        & gum style --foreground 214 --bold $Message | Out-Host
     }
     else {
         Write-Host $Message -ForegroundColor Yellow
@@ -153,7 +153,7 @@ function Confirm-InstallChoice {
 function Show-InstallerBanner {
     if (Test-GumUi) {
         "$script:ShellDeckLogo`n`nLocal shell and CLI setup for Windows`nOptional SSH host management and dashboard." |
-            gum style --border rounded --border-foreground 39 --padding "1 2" --margin "1 0" --foreground 255 --bold
+            gum style --border rounded --border-foreground 39 --padding "1 2" --margin "1 0" --foreground 255 --bold | Out-Host
     }
     else {
         Write-Host ""
@@ -642,29 +642,25 @@ function Configure-Infra {
     }
 }
 
-function Get-InstallerReinvokeArguments {
-    $arguments = @()
+function Get-InstallerReinvokeParameters {
+    # Hashtable splatting binds named script parameters; an array binds positionally.
+    $parameters = @{ Ui = "gum" }
 
-    if ($Yes) { $arguments += "-Yes" }
-    if ($SkipDeps) { $arguments += "-SkipDeps" }
-    if ($SkipInfra) { $arguments += "-SkipInfra" }
-    if ($DryRun) { $arguments += "-DryRun" }
+    if ($Yes) { $parameters.Yes = $true }
+    if ($SkipDeps) { $parameters.SkipDeps = $true }
+    if ($SkipInfra) { $parameters.SkipInfra = $true }
+    if ($DryRun) { $parameters.DryRun = $true }
     if (-not [string]::IsNullOrWhiteSpace($Mode)) {
-        $arguments += "-Mode"
-        $arguments += $Mode
+        $parameters.Mode = $Mode
     }
     if (-not [string]::IsNullOrWhiteSpace($MachineProfile)) {
-        $arguments += "-MachineProfile"
-        $arguments += $MachineProfile
+        $parameters.MachineProfile = $MachineProfile
     }
     if (-not [string]::IsNullOrWhiteSpace($InstallDir)) {
-        $arguments += "-InstallDir"
-        $arguments += $InstallDir
+        $parameters.InstallDir = $InstallDir
     }
 
-    $arguments += "-Ui"
-    $arguments += "gum"
-    return $arguments
+    return $parameters
 }
 
 function Restart-InstallerWithGumIfPossible {
@@ -683,9 +679,9 @@ function Restart-InstallerWithGumIfPossible {
 
     Write-Step "Relaunching installer with Gum UI..."
     $env:SHELLDECK_GUM_REEXECED = "1"
-    $arguments = Get-InstallerReinvokeArguments
-    & $PSCommandPath @arguments
-    exit $LASTEXITCODE
+    $parameters = Get-InstallerReinvokeParameters
+    & $PSCommandPath @parameters
+    exit 0
 }
 
 function Initialize-InstallerUi {
