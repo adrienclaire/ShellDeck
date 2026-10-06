@@ -2,6 +2,57 @@
 # ShellDeck - Bash/Zsh profile runtime
 # Source this file from ~/.bashrc or ~/.zshrc.
 
+_SHELLDECK_RESTORE_ALIAS_EXPANSION=0
+if [ -n "${BASH_VERSION:-}" ]; then
+  shopt -q expand_aliases && _SHELLDECK_RESTORE_ALIAS_EXPANSION=1
+  shopt -u expand_aliases
+else
+  [[ -o aliases ]] && _SHELLDECK_RESTORE_ALIAS_EXPANSION=1
+  unsetopt aliases
+fi
+
+# A temporary loader lets us restore caller commands after defining defaults.
+# Aliases are suspended while parsing function declarations (Bash expands their names).
+_shelldeck_load_runtime() {
+  local saved_functions="" saved_aliases="" names name definition
+  if [ -n "${BASH_VERSION:-}" ]; then
+    names="$(declare -F | awk '{print $3}')"
+  else
+    names="$(print -rl -- ${(k)functions})"
+  fi
+  while IFS= read -r name; do
+    [ -n "$name" ] && [ "$name" != "_shelldeck_load_runtime" ] || continue
+    definition="$(typeset -f "$name")"
+    case "${_SHELLDECK_DEFAULT_FUNCTIONS:-}" in
+      *"$definition"*) ;;
+      *) saved_functions="$saved_functions$definition
+" ;;
+    esac
+  done <<EOF
+$names
+EOF
+  if [ -n "${BASH_VERSION:-}" ]; then
+    names="$(compgen -A alias || true)"
+  else
+    names="$(print -rl -- ${(k)aliases})"
+  fi
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    if [ -n "${BASH_VERSION:-}" ]; then
+      definition="$(alias "$name")"
+    else
+      definition="$(alias -L "$name")"
+    fi
+    case "${_SHELLDECK_DEFAULT_ALIASES:-}" in
+      *"$definition"*) ;;
+      *) saved_aliases="$saved_aliases$definition
+" ;;
+    esac
+  done <<EOF
+$names
+EOF
+  unalias -a
+
 export SHELL_ALIAS_TOOLS_HOME="${SHELL_ALIAS_TOOLS_HOME:-$HOME/.shell-alias-tools}"
 export ALIAS_TOOLS_FILE="${ALIAS_TOOLS_FILE:-$SHELL_ALIAS_TOOLS_HOME/aliases.sh}"
 export INFRA_HOSTS_FILE="${INFRA_HOSTS_FILE:-$SHELL_ALIAS_TOOLS_HOME/infra-hosts.csv}"
@@ -96,6 +147,7 @@ shell-tools-ensure-home() {
 
 _shell_tools_migrate_infra_hosts() {
   local tmp="${INFRA_HOSTS_FILE}.tmp.$$"
+  cp "$INFRA_HOSTS_FILE" "${INFRA_HOSTS_FILE}.bak.$(date +%Y%m%d%H%M%S).$$" || return 1
 
   {
     printf "Name,HostName,SshEnabled,User,Port,InSshConfig,Docker,Services\n"
@@ -322,6 +374,10 @@ _shell_tools_alias_default() {
   local name="$1"
   shift || true
 
+  # A caller function with this name must not be hidden behind a default alias.
+  case "${saved_functions:-}" in
+    *"$name ()"*|*"$name()"*) return 0 ;;
+  esac
   alias "$name" >/dev/null 2>&1 || alias "$name=$*"
 }
 
@@ -1629,7 +1685,7 @@ shelldeck-update() {
   local runtime="$SHELL_ALIAS_TOOLS_HOME/shell-tools.sh"
   local url="https://raw.githubusercontent.com/adrienclaire/ShellDeck/$ref/shell-tools.sh"
   local tmp="${runtime}.update.$$"
-  local backup="${runtime}.bak.$(date +%Y%m%d%H%M%S)"
+  local backup=""
 
   shell-tools-ensure-home
   printf "%sUpdating ShellDeck runtime from %s...%s\n" "$ST_CYAN" "$ref" "$ST_RESET"
@@ -1657,8 +1713,18 @@ shelldeck-update() {
     return 1
   fi
 
-  [ ! -f "$runtime" ] || cp "$runtime" "$backup"
-  mv "$tmp" "$runtime"
+  if [ -f "$runtime" ]; then
+    backup="$(mktemp "${runtime}.bak.$(date +%Y%m%d%H%M%S).XXXXXX")" || {
+      rm -f "$tmp"
+      return 1
+    }
+    if ! cp "$runtime" "$backup"; then
+      rm -f "$tmp" "$backup"
+      echo "Runtime backup failed; update cancelled." >&2
+      return 1
+    fi
+  fi
+  mv "$tmp" "$runtime" || return 1
   chmod 644 "$runtime"
 
   # shellcheck disable=SC1090
@@ -1717,17 +1783,73 @@ _shell_tools_disable_infra_commands_for_workstation() {
   unset -f shellsetup init infra-add infra-edit infra-list sshhosts 2>/dev/null || true
 }
 
-alias aa='add-alias-last'
-alias laa='list-alias'
-alias rma='rm-alias'
+_shell_tools_alias_default aa 'add-alias-last'
+_shell_tools_alias_default laa 'list-alias'
+_shell_tools_alias_default rma 'rm-alias'
 
-alias-tools-load
 _shell_tools_disable_infra_commands_for_workstation
 
 case "$-" in
   *i*)
     _shell_tools_configure_smart_shell
-    alias-tools-load
-    shell-tools-dashboard
     ;;
 esac
+
+  # Remember only defaults, so the next reload can replace them without losing user overrides.
+  _SHELLDECK_DEFAULT_FUNCTIONS=""
+  if [ -n "${BASH_VERSION:-}" ]; then
+    names="$(declare -F | awk '{print $3}')"
+  else
+    names="$(print -rl -- ${(k)functions})"
+  fi
+  while IFS= read -r name; do
+    [ -n "$name" ] && [ "$name" != "_shelldeck_load_runtime" ] || continue
+    definition="$(typeset -f "$name")"
+    case "$saved_functions" in
+      *"$definition"*) ;;
+      *) _SHELLDECK_DEFAULT_FUNCTIONS="$_SHELLDECK_DEFAULT_FUNCTIONS$definition
+" ;;
+    esac
+  done <<EOF
+$names
+EOF
+  if [ -n "${BASH_VERSION:-}" ]; then
+    _SHELLDECK_DEFAULT_ALIASES="$(alias -p)"
+  else
+    _SHELLDECK_DEFAULT_ALIASES="$(alias -L)"
+  fi
+  eval "$saved_functions"
+  eval "$saved_aliases"
+  alias-tools-load
+  # User functions loaded from aliases.sh must also win over our aliases.
+  if [ -n "${BASH_VERSION:-}" ]; then
+    names="$(compgen -A alias || true)"
+  else
+    names="$(print -rl -- ${(k)aliases})"
+  fi
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    definition="$(typeset -f "$name" 2>/dev/null)" || continue
+    case "$_SHELLDECK_DEFAULT_FUNCTIONS" in
+      *"$definition"*) ;;
+      *)
+        if [ -n "${BASH_VERSION:-}" ]; then
+          definition="$(alias "$name")"
+        else
+          definition="$(alias -L "$name")"
+        fi
+        case "$_SHELLDECK_DEFAULT_ALIASES" in *"$definition"*) unalias "$name" ;; esac
+        ;;
+    esac
+  done <<EOF
+$names
+EOF
+  case "$-" in *i*) shell-tools-dashboard ;; esac
+}
+
+_shelldeck_load_runtime
+unset -f _shelldeck_load_runtime
+if [ "$_SHELLDECK_RESTORE_ALIAS_EXPANSION" = "1" ]; then
+  if [ -n "${BASH_VERSION:-}" ]; then shopt -s expand_aliases; else setopt aliases; fi
+fi
+unset _SHELLDECK_RESTORE_ALIAS_EXPANSION

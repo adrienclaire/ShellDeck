@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ORIGINAL_ARGS=("$@")
-SHELL_TOOLS_VERSION="${SHELL_TOOLS_VERSION:-0.2.3}"
+SHELL_TOOLS_VERSION="${SHELL_TOOLS_VERSION:-0.2.4}"
 SHELL_ALIAS_TOOLS_REF="${SHELL_ALIAS_TOOLS_REF:-v$SHELL_TOOLS_VERSION}"
 RAW_BASE="${SHELL_ALIAS_TOOLS_RAW_BASE:-https://raw.githubusercontent.com/adrienclaire/ShellDeck/$SHELL_ALIAS_TOOLS_REF}"
 INSTALL_DIR="${SHELL_ALIAS_TOOLS_HOME:-$HOME/.shell-alias-tools}"
@@ -31,7 +31,7 @@ Usage:
   bash install.sh [--yes] [--dry-run] [--ui auto|gum|classic] [--profile control|workstation] [--mode basic|complete|manual] [--skip-deps] [--skip-infra] [--os linux|macos]
 
 Examples:
-  curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.3/install.sh && bash install.sh
+  curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.sh && bash install.sh
   bash install.sh --dry-run
   bash install.sh --ui gum
 USAGE
@@ -114,8 +114,13 @@ ui_gum() {
   [ "$SHELLDECK_USE_GUM" -eq 1 ] && command -v gum >/dev/null 2>&1 && ui_can_prompt
 }
 
-refresh_gum_path() {
+refresh_installer_session_path() {
+  # Only the installer process: preserve search order and never write startup files.
+  [ "$DRY_RUN" -eq 0 ] || return 0
   local dir
+  local entry
+  local found
+  local path_entries
 
   for dir in \
     "$HOME/.local/bin" \
@@ -124,12 +129,15 @@ refresh_gum_path() {
     /usr/local/bin \
     /snap/bin; do
     [ -d "$dir" ] || continue
-    case ":$PATH:" in
-      *":$dir:"*) ;;
-      *) PATH="$dir:$PATH" ;;
-    esac
+    found=0
+    IFS=: read -r -a path_entries <<< "${PATH:-}"
+    for entry in "${path_entries[@]}"; do
+      if [ "${entry%/}" = "${dir%/}" ]; then found=1; break; fi
+    done
+    [ "$found" -eq 1 ] || PATH="${PATH:+$PATH:}$dir"
   done
   export PATH
+  hash -r 2>/dev/null || true
 }
 
 reexec_with_gum_if_possible() {
@@ -191,11 +199,11 @@ dry_run() {
 
 ui_banner() {
   if ui_gum; then
-    printf "%s\n\nSmart shell bootstrap for workstations and control nodes\nInfra-aware setup. Hardened defaults. Fast terminal workflows." "$SHELLDECK_LOGO" |
+    printf "%s\n\nLocal shell and CLI setup for Linux and macOS\nOptional SSH host management and dashboard." "$SHELLDECK_LOGO" |
       gum style --border rounded --border-foreground 39 --padding "1 2" --margin "1 0" --foreground 255 --bold
   else
     printf "\n%s\n" "$SHELLDECK_LOGO"
-    info "Smart shell bootstrap for workstations and control nodes"
+    info "Local shell and CLI setup for Linux and macOS"
   fi
 }
 
@@ -450,6 +458,15 @@ normalize_machine_profile() {
 }
 
 choose_machine_profile() {
+  if [ -z "$MACHINE_PROFILE" ] && [ -f "$INSTALL_DIR/config" ]; then
+    local saved_profile
+    saved_profile="$(sed -n 's/^[[:space:]]*SHELLDECK_MACHINE_PROFILE[[:space:]]*=[[:space:]]*//p' "$INSTALL_DIR/config" | head -n 1 | tr -d '\r"')"
+    if saved_profile="$(normalize_machine_profile "$saved_profile")"; then
+      warn "Keeping saved machine profile: $saved_profile. Use --profile to change it." >&2
+      printf "%s" "$saved_profile"
+      return
+    fi
+  fi
   local choice
   local normalized
 
@@ -615,13 +632,21 @@ write_runtime_config() {
     return
   fi
 
-  printf "SHELLDECK_MACHINE_PROFILE=%s\n" "$machine_profile" > "$config_file"
+  local tmp="${config_file}.tmp.$$"
+  if [ -f "$config_file" ]; then
+    awk '!/^[[:space:]]*SHELLDECK_MACHINE_PROFILE[[:space:]]*=/' "$config_file" > "$tmp"
+  else
+    : > "$tmp"
+  fi
+  printf "SHELLDECK_MACHINE_PROFILE=%s\n" "$machine_profile" >> "$tmp"
+  mv "$tmp" "$config_file"
 }
 
 copy_runtime() {
   local machine_profile="$1"
   local script_path
   local script_dir
+  local staged_runtime
 
   if [ "$DRY_RUN" -eq 1 ]; then
     dry_run "would create $INSTALL_DIR and install shell-tools.sh, aliases.sh, and profile config"
@@ -635,14 +660,26 @@ copy_runtime() {
   mkdir -p "$INSTALL_DIR"
   script_path="${BASH_SOURCE[0]:-$0}"
   script_dir="$(cd "$(dirname "$script_path")" >/dev/null 2>&1 && pwd -P || pwd)"
+  staged_runtime="$(mktemp "$INSTALL_DIR/shell-tools.sh.install.XXXXXX")"
 
   if [ -f "$script_dir/shell-tools.sh" ]; then
-    cp "$script_dir/shell-tools.sh" "$INSTALL_DIR/shell-tools.sh"
+    cp "$script_dir/shell-tools.sh" "$staged_runtime"
   else
     info "Downloading shell runtime..."
-    download_file "$RAW_BASE/shell-tools.sh" "$INSTALL_DIR/shell-tools.sh"
+    if ! download_file "$RAW_BASE/shell-tools.sh" "$staged_runtime"; then
+      rm -f "$staged_runtime"
+      return 1
+    fi
   fi
-
+  if ! bash -n "$staged_runtime"; then
+    rm -f "$staged_runtime"
+    echo "Runtime failed syntax validation; existing runtime was not replaced." >&2
+    return 1
+  fi
+  if [ -f "$INSTALL_DIR/shell-tools.sh" ]; then
+    cp "$INSTALL_DIR/shell-tools.sh" "$INSTALL_DIR/shell-tools.sh.bak.$(date +%Y%m%d%H%M%S).$$"
+  fi
+  mv "$staged_runtime" "$INSTALL_DIR/shell-tools.sh"
   chmod 644 "$INSTALL_DIR/shell-tools.sh"
   [ -f "$INSTALL_DIR/aliases.sh" ] || : > "$INSTALL_DIR/aliases.sh"
   write_runtime_config "$machine_profile"
@@ -681,7 +718,7 @@ install_profile_hook() {
   mkdir -p "$(dirname "$profile")"
   touch "$profile"
 
-  if grep -q "shell-alias-tools" "$profile"; then
+  if grep -Fxq '# >>> shell-alias-tools >>>' "$profile"; then
     warn "Profile already contains Shell Alias Tools hook: $profile"
     return
   fi
@@ -703,7 +740,7 @@ ensure_homebrew() {
     warn "Homebrew is not installed."
     if prompt_yes_no "Install Homebrew now?" "$default"; then
       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null || true)"
+      refresh_installer_session_path
     else
       return
     fi
@@ -1038,7 +1075,7 @@ bootstrap_gum_ui() {
       ;;
   esac
 
-  refresh_gum_path
+  refresh_installer_session_path
   if command -v gum >/dev/null 2>&1; then
     SHELLDECK_USE_GUM=1
     reexec_with_gum_if_possible || true
@@ -1161,6 +1198,7 @@ install_dependencies() {
         install_macos_dependency "$tool" "yes" || warn "Could not install $tool automatically."
         ;;
     esac
+    refresh_installer_session_path
   done
 
   if [ "$mode" = "basic" ]; then
@@ -1205,6 +1243,7 @@ install_dependencies() {
         install_macos_dependency "$tool" "no" || warn "Could not install $tool automatically."
         ;;
     esac
+    refresh_installer_session_path
   done
 }
 
@@ -1981,7 +2020,7 @@ configure_linux_mfa() {
 configure_linux_security() {
   local os="$1"
 
-  [ "$os" = "linux" ] || return
+  [ "$os" = "linux" ] || return 0
 
   ui_section "Linux security setup"
   configure_ufw_firewall

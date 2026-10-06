@@ -24,12 +24,18 @@ jobs:
           bash -n install-linux.sh
           bash -n install-macos.sh
           bash -n shell-tools.sh
+      - name: Install Zsh for compatibility tests
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
       - name: Run Bash regression tests
         run: |
           bash tests/test-installer-ui.sh
           bash tests/test-ssh-mfa-config.sh
           bash tests/test-init-docker-scan.sh
           bash tests/test-shell-update.sh
+          bash tests/test-preservation.sh
       - name: Run workstation onboarding integration flow
         if: matrix.os == 'ubuntu-latest'
         run: bash tests/integration-workstation-flow.sh
@@ -71,6 +77,9 @@ jobs:
       - name: Run PowerShell regression tests
         shell: pwsh
         run: pwsh -NoProfile -File tests/test-powershell-dashboard-cache.ps1
+      - name: Verify PowerShell preservation
+        shell: pwsh
+        run: pwsh -NoProfile -File tests/test-preservation.ps1
       - name: PSScriptAnalyzer errors
         shell: pwsh
         run: |

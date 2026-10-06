@@ -14,7 +14,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ShellToolsVersion = if ($env:SHELL_TOOLS_VERSION) { $env:SHELL_TOOLS_VERSION } else { "0.2.3" }
+$ShellToolsVersion = if ($env:SHELL_TOOLS_VERSION) { $env:SHELL_TOOLS_VERSION } else { "0.2.4" }
 $ShellAliasToolsRef = if ($env:SHELL_ALIAS_TOOLS_REF) { $env:SHELL_ALIAS_TOOLS_REF } else { "v$ShellToolsVersion" }
 $RawBase = if ($env:SHELL_ALIAS_TOOLS_RAW_BASE) {
     $env:SHELL_ALIAS_TOOLS_RAW_BASE
@@ -34,19 +34,41 @@ $script:ShellDeckLogo = @"
 /____/_/ /_/\___/_/_/\___/_/_/\___/\___/ /_/|_|  v$ShellToolsVersion
 "@
 
-function Update-GumPath {
+function Refresh-InstallerSessionPath {
+    if ($DryRun) {
+        Write-DryRun "would refresh the installer process PATH (no persistent PATH changes)"
+        return
+    }
+
+    # Keep process search order; append newly installed tools without writing User/Machine PATH.
+    $separator = [System.IO.Path]::PathSeparator
+    $processPath = [System.Environment]::GetEnvironmentVariable("Path", "Process")
+    $paths = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in ($processPath -split [regex]::Escape([string]$separator))) {
+        $paths.Add($entry)
+        [void]$seen.Add($entry.Trim().Trim('"').TrimEnd('\', '/'))
+    }
     $candidates = @(
-        (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"),
-        (Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"),
+        ([System.Environment]::GetEnvironmentVariable("Path", "Machine") -split [regex]::Escape([string]$separator)),
+        ([System.Environment]::GetEnvironmentVariable("Path", "User") -split [regex]::Escape([string]$separator)),
         (Join-Path $HOME ".local\bin"),
         (Join-Path $HOME "bin")
-    ) | Where-Object { $_ -and (Test-Path $_) }
-
+    )
+    if ($env:LOCALAPPDATA) {
+        $candidates += Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links"
+        $candidates += Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
+    }
     foreach ($candidate in $candidates) {
-        if ((";{0};" -f $env:PATH) -notlike "*;$candidate;*") {
-            $env:PATH = "$candidate;$env:PATH"
+        foreach ($entry in $candidate) {
+            if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+            $entry = [System.Environment]::ExpandEnvironmentVariables($entry).Trim().Trim('"')
+            if ((Test-Path -LiteralPath $entry -PathType Container) -and $seen.Add($entry.TrimEnd('\', '/'))) {
+                $paths.Add($entry)
+            }
         }
     }
+    [System.Environment]::SetEnvironmentVariable("Path", ($paths -join $separator), "Process")
 }
 
 function Test-GumUi {
@@ -130,13 +152,13 @@ function Confirm-InstallChoice {
 
 function Show-InstallerBanner {
     if (Test-GumUi) {
-        "$script:ShellDeckLogo`n`nSmart shell bootstrap for workstations and control nodes`nInfra-aware setup. Hardened defaults. Fast terminal workflows." |
+        "$script:ShellDeckLogo`n`nLocal shell and CLI setup for Windows`nOptional SSH host management and dashboard." |
             gum style --border rounded --border-foreground 39 --padding "1 2" --margin "1 0" --foreground 255 --bold
     }
     else {
         Write-Host ""
         Write-Host $script:ShellDeckLogo -ForegroundColor Cyan
-        Write-Step "Smart shell bootstrap for workstations and control nodes"
+        Write-Step "Local shell and CLI setup for Windows"
     }
 }
 
@@ -206,6 +228,18 @@ function Normalize-MachineProfile {
 }
 
 function Read-MachineProfile {
+    $configPath = Join-Path $InstallDir "config"
+    if ([string]::IsNullOrWhiteSpace($MachineProfile) -and (Test-Path $configPath)) {
+        foreach ($line in Get-Content -LiteralPath $configPath) {
+            if ($line -match '^\s*SHELLDECK_MACHINE_PROFILE\s*=\s*"?([^"\r\n]+)"?\s*$') {
+                $savedProfile = Normalize-MachineProfile $matches[1]
+                if ($savedProfile) {
+                    Write-Warn "Keeping saved machine profile: $savedProfile. Use -MachineProfile to change it."
+                    return $savedProfile
+                }
+            }
+        }
+    }
     if (-not [string]::IsNullOrWhiteSpace($MachineProfile)) {
         $normalized = Normalize-MachineProfile $MachineProfile
         if ($normalized) {
@@ -319,8 +353,11 @@ function Write-RuntimeConfig {
         return
     }
 
+    $lines = if (Test-Path $configPath) { @(Get-Content -LiteralPath $configPath) } else { @() }
+    $lines = @($lines | Where-Object { $_ -notmatch '^\s*SHELLDECK_MACHINE_PROFILE\s*=' })
+    $lines += "SHELLDECK_MACHINE_PROFILE=$SelectedMachineProfile"
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($configPath, "SHELLDECK_MACHINE_PROFILE=$SelectedMachineProfile`n", $utf8NoBom)
+    [System.IO.File]::WriteAllText($configPath, (($lines -join "`n") + "`n"), $utf8NoBom)
 }
 
 function Ensure-InstallFiles {
@@ -340,14 +377,28 @@ function Ensure-InstallFiles {
     }
 
     $runtimePath = Join-Path $InstallDir "shell-tools.ps1"
+    $stagedRuntime = "$runtimePath.install.$PID"
     $localRuntime = if ($PSScriptRoot) { Join-Path $PSScriptRoot "alias-tools.ps1" } else { "" }
 
-    if ($localRuntime -and (Test-Path $localRuntime)) {
-        Copy-Item -Path $localRuntime -Destination $runtimePath -Force
+    try {
+        if ($localRuntime -and (Test-Path $localRuntime)) {
+            Copy-Item -LiteralPath $localRuntime -Destination $stagedRuntime -Force
+        }
+        else {
+            Write-Step "Downloading PowerShell runtime..."
+            Invoke-WebRequest -Uri "$RawBase/alias-tools.ps1" -OutFile $stagedRuntime
+        }
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($stagedRuntime, [ref]$tokens, [ref]$parseErrors) | Out-Null
+        if ($parseErrors) { throw "Runtime failed syntax validation; existing runtime was not replaced." }
+        if (Test-Path $runtimePath) {
+            Copy-Item -LiteralPath $runtimePath -Destination "$runtimePath.bak.$(Get-Date -Format yyyyMMddHHmmssfff)"
+        }
+        Move-Item -LiteralPath $stagedRuntime -Destination $runtimePath -Force
     }
-    else {
-        Write-Step "Downloading PowerShell runtime..."
-        Invoke-WebRequest -Uri "$RawBase/alias-tools.ps1" -OutFile $runtimePath
+    finally {
+        Remove-Item -LiteralPath $stagedRuntime -Force -ErrorAction SilentlyContinue
     }
 
     $aliasesPath = Join-Path $InstallDir "aliases.ps1"
@@ -385,7 +436,7 @@ function Add-ProfileHook {
         New-Item -ItemType File -Force -Path $profilePath | Out-Null
     }
 
-    if (Select-String -Path $profilePath -Pattern "shell-alias-tools" -Quiet -ErrorAction SilentlyContinue) {
+    if (Select-String -Path $profilePath -Pattern '^# >>> shell-alias-tools >>>$' -Quiet -ErrorAction SilentlyContinue) {
         Write-Warn "Profile already contains Shell Alias Tools hook: $profilePath"
         return
     }
@@ -474,6 +525,7 @@ function Install-WindowsDependency {
 
     try {
         winget install --id $wingetPackages[$Tool] --exact --accept-source-agreements --accept-package-agreements
+        Refresh-InstallerSessionPath
     }
     catch {
         Write-Warn "winget install failed for $Tool."
@@ -620,7 +672,7 @@ function Restart-InstallerWithGumIfPossible {
         return
     }
 
-    Update-GumPath
+    Refresh-InstallerSessionPath
     if (-not (Get-Command gum -ErrorAction SilentlyContinue)) {
         return
     }
@@ -649,7 +701,7 @@ function Initialize-InstallerUi {
         $normalizedUi = "auto"
     }
 
-    Update-GumPath
+    Refresh-InstallerSessionPath
     if (Get-Command gum -ErrorAction SilentlyContinue) {
         $script:UseGum = $true
         return

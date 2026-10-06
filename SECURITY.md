@@ -6,7 +6,8 @@ ShellDeck changes shell startup files, installs packages, and can optionally con
 
 | Version | Supported |
 | --- | --- |
-| 0.1.x | Yes |
+| 0.2.x | Yes |
+| 0.1.x | Upgrade to 0.2.x |
 
 ## Safe Install Guidance
 
@@ -15,8 +16,8 @@ Before enabling SSH, firewall, fail2ban, or MFA automation on a production machi
 Prefer tagged release URLs over `main`:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```
@@ -24,8 +25,8 @@ bash install.sh
 On Windows:
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/install.ps1 -OutFile install.ps1
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.0/checksums.txt -OutFile checksums.txt
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/checksums.txt -OutFile checksums.txt
 Get-FileHash .\install.ps1 -Algorithm SHA256
 .\install.ps1
 ```
@@ -41,6 +42,12 @@ bash install.sh --dry-run
 ```
 
 ## Risky Features
+
+Dry-run previews selected actions without writing files, installing packages, changing the process PATH, or loading the runtime. For a non-interactive preview, use `--dry-run --yes --classic-ui --profile workstation --mode basic` or `-DryRun -Yes -ClassicUi -MachineProfile workstation -Mode basic`.
+
+The installer only appends missing directories to the process PATH. It does not write persistent User/Machine PATH; third-party package installers may change it themselves. Runtime updates replace only the runtime after syntax validation and a backup. Syntax validation is not signature verification or a sandbox.
+
+`shelluninstall` removes marked profile hooks and keeps local user data by default. It does not remove CLI packages or undo SSH, UFW, fail2ban, or PAM configuration. Local alias/function files are executable code and must be treated as trusted user input.
 
 These features are disabled or guarded by default:
 

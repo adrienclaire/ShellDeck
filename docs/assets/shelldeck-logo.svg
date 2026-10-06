@@ -11,7 +11,7 @@
   </g>
   <g transform="translate(248 69)">
     <text x="0" y="62" fill="#f8fbff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="68" font-weight="760" letter-spacing="0">ShellDeck</text>
-    <text x="3" y="111" fill="#94a3b8" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="25" font-weight="500" letter-spacing="0">Smart shell bootstrap for workstations and control nodes</text>
+    <text x="3" y="111" fill="#94a3b8" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="25" font-weight="500" letter-spacing="0">Local shell and CLI setup for Windows, Linux and macOS</text>
   </g>
   <path d="M56 224h848" stroke="#1f2a44" stroke-width="2"/>
   <circle cx="824" cy="78" r="6" fill="#43e38d"/>

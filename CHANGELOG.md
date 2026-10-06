@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.2.4 - 2026-10-06
+
+- Reorganized the README around bootstrap scope, dotfiles coexistence, dry-run, installed files, update preservation, and uninstall limits.
+- Preserved caller aliases/functions and loaded user customization last on PowerShell, Bash, and Zsh, including runtime reloads.
+- Reinstall now retains configuration keys and the saved machine profile unless explicitly changed.
+- Renamed installer PATH helpers and appended missing directories to process PATH without persistent writes or changing existing search order.
+- Added runtime validation/backups during reinstall and regression coverage for preservation and dry-runs.
+- Fixed macOS control setup exiting when the Linux-only security step is skipped.
+- Made updated PowerShell functions survive the updater's local scope and clarified reload failure reporting.
+- Backed up legacy infra CSV files before schema migration and avoided update backup-name collisions.
+
 ## 0.2.3 - 2026-06-26
 
 - Added Microsoft Coreutils as a required Windows smart-shell dependency through `winget install Microsoft.Coreutils`.

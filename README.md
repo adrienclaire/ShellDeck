@@ -1,12 +1,96 @@
 <p align="center">
-  <img src="docs/assets/shelldeck-logo.svg" alt="ShellDeck - smart shell bootstrap for workstations and control nodes" width="760">
+  <img src="docs/assets/shelldeck-logo.svg" alt="ShellDeck - local shell and CLI setup" width="760">
 </p>
 
 # ShellDeck
 
-ShellDeck is a cross-platform smart shell bootstrap for fresh VMs, workstations, and homelab control nodes.
+ShellDeck is an interactive local bootstrapper for Windows, Linux, and macOS. It installs or checks CLI tools, adds a PowerShell/Bash/Zsh runtime through a marked profile hook, and optionally configures SSH access and local infra helpers.
 
-ShellDeck installs a profile runtime that upgrades your terminal startup, keeps personal aliases/functions in one place, and can optionally turn a control node into an infra dashboard for SSH hosts such as Proxmox, Docker VMs, and app servers.
+**Inspect first:** clone this repository, read the installer, then run the [dry-run commands below](#safety--inspectability). **Remove later:** `shelluninstall` removes the hook and keeps user data unless you explicitly choose deletion. It does not undo installed packages or SSH/firewall/PAM changes.
+
+## What ShellDeck is, and what it is not
+
+- A bootstrap layer for a fresh machine: tool installation, shell integration, workstation/control-node selection, and optional SSH host/service helpers and startup dashboard.
+- Not a replacement for dotfiles, chezmoi, Ansible, cloud-init, or enterprise configuration management. If you only need to sync a PowerShell profile or `.bashrc`, a dotfiles repository is enough.
+- Opinionated defaults, kept in the runtime rather than mixed into user files. Existing aliases/functions take precedence; the separate user customization file is loaded last. ShellDeck does not replace your profile with its own.
+- Runtime updates preserve user aliases/functions, infra hosts, saved machine profile, SSH configuration/keys, and local data. The runtime is backed up before replacement. Reinstalling keeps configuration keys and the saved machine profile unless you explicitly choose another profile.
+
+## Why not just dotfiles?
+
+Dotfiles work well for syncing personal configuration. ShellDeck handles the local setup around those files: discovering missing tools, installing accepted dependencies, loading a runtime, and offering SSH/infra setup. You can use both. Keep your dotfiles in your existing workflow; put ShellDeck-specific overrides in `aliases.ps1` or `aliases.sh`, or define them in your own profile. Updates do not overwrite these files.
+
+## ShellDeck vs dotfiles / chezmoi / Ansible
+
+| Tool | Primary purpose | Relationship to ShellDeck |
+| --- | --- | --- |
+| dotfiles repository | Sync personal configuration | Enough for config-only needs; can coexist with ShellDeck |
+| chezmoi | Dotfiles with templates and secrets | Manages personal config; ShellDeck offers local interactive bootstrap |
+| Ansible | Infrastructure configuration management | Suited to repeatable fleet management; ShellDeck runs locally |
+| ShellDeck | Interactive cross-platform bootstrap, shell runtime, CLI tools, SSH/infra helpers | Optional setup layer, not a dotfiles or fleet manager |
+
+## Safety / inspectability
+
+From a local clone, preview a deterministic workstation setup without downloading a runtime, installing packages, writing files, or loading the runtime:
+
+```powershell
+.\install.ps1 -DryRun -Yes -ClassicUi -MachineProfile workstation -Mode basic
+```
+
+```bash
+bash install.sh --dry-run --yes --classic-ui --profile workstation --mode basic
+```
+
+Use `control` to preview control-node setup. Without `--yes` / `-Yes`, dry-run remains interactive and previews only selected branches. It does not validate real installations or connectivity. macOS uses the same Bash installer; `--os macos` previews package mappings on Linux but is not a native macOS test.
+
+| Surface | Changes | Preservation / limits |
+| --- | --- | --- |
+| Runtime | `~/.shell-alias-tools/shell-tools.ps1` or `shell-tools.sh` | Timestamped runtime backup on update/reinstall |
+| User code | Creates `aliases.ps1` / `aliases.sh` if absent, loads it last | Existing contents and custom functions never overwritten on update/reinstall |
+| Settings/data | `config`, control-node `infra-hosts.csv`, PowerShell dashboard cache | Updates retain them; reinstall changes only the selected machine-profile key |
+| Startup file | Appends a marked hook to `$PROFILE` on Windows; `.zshrc` and existing `.bashrc` on macOS; `.bashrc` or `.zshrc` on Linux | Keeps content outside the hook; detects an existing hook |
+| PATH | Refreshes the installer process search path | Keeps search order; no ShellDeck persistent User/Machine PATH writes or profile PATH lines |
+| Packages | Basic installs the default tool set; Complete adds `gh`, Docker, Multipass; Manual asks per tool | Detects existing tools; package installers may have their own persistent PATH/system effects |
+| SSH/security | Optional SSH setup; Linux UFW, fail2ban, PAM/TOTP configuration after confirmation | Runtime updates leave SSH/security files alone; uninstall does not revert these changes |
+
+Tool installation is best-effort: package availability and mappings differ across operating systems. Unsupported or failed installs are reported; use `check-tools` to see what is actually available. Older infra CSV schemas may be migrated when the runtime loads; a backup keeps the original file.
+
+The directory can be changed with `SHELL_ALIAS_TOOLS_HOME` (also `-InstallDir` on Windows). Keep that environment setting when loading a runtime installed in a custom directory.
+
+**Scope:** Workstation skips infra host management. Control node enables `init`, `infra-add`, `infra-edit`, and `sshhosts`. Windows Workstation skips inbound SSH setup; Linux/macOS can offer it. Linux also offers firewall/fail2ban/MFA. `--skip-deps` / `-SkipDeps` skips dependencies and local SSH/security setup; `--skip-infra` / `-SkipInfra` skips host onboarding. Gum is independently offered for the installer UI; use `--classic-ui` / `-ClassicUi` to avoid that bootstrap.
+
+**Session behavior:** the runtime can configure history/completion, fzf bindings, and the prompt. Set `SHELL_TOOLS_NO_PROMPT=1` before loading to keep your prompt. PowerShell also preserves a custom `prompt` function already present; use the opt-out for Bash/Zsh prompt customization. The dashboard is optional: PowerShell has `shelldeckinfo-disabled`; `SHELL_TOOLS_NO_DASHBOARD=1` suppresses it on either runtime. Bash/Zsh enhancements and startup output run only in interactive shells; PowerShell automation should suppress the banner or use `-NoProfile`.
+
+**Sensitive helpers:** `please` (sudo from history) and PowerShell `add-func` (persist executable code) are disabled by default. Starship's remote installer fallback requires opt-in. Customization files are executable user code, not a sandbox.
+
+**Update:** `shelldeck-update` downloads, syntax-checks, backs up, and replaces only the runtime. It defaults to `main`; set `SHELLDECK_UPDATE_REF` to a reviewed tag. Syntax validation does not establish trust in downloaded code. See [Updating](#updating).
+
+**Uninstall:** `shelluninstall` removes the hook after confirmation. Answer **no** to deleting local data to keep aliases, settings, and infra hosts, then restart the shell. Packages, SSH config/keys, firewall rules, and PAM changes remain; undo them separately if enabled. Test SSH/firewall/MFA in a disposable VM with recovery access; see [SECURITY.md](SECURITY.md).
+
+## User customization and precedence
+
+Do not edit the shipped runtime to keep a change across updates. Edit `~/.shell-alias-tools/aliases.ps1` or `aliases.sh`, or keep your commands in your own dotfiles. Definitions already in the session survive runtime loads/reloads; the separate user file runs last and overrides runtime defaults. Normal alias/function precedence still applies: remove an existing alias explicitly if you want to replace it with a function of the same name. Internal `_shell_tools_*` / `_alias_tools_*` helpers and `ShellDeck*` state variables are reserved implementation details.
+
+PowerShell example in `aliases.ps1`:
+
+```powershell
+function ll { Get-ChildItem -Force }
+Set-Alias gs Get-Location
+```
+
+Bash/Zsh example in `aliases.sh`:
+
+```bash
+alias ll='ls -la'
+gs() { git status --short; }
+```
+
+PowerShell aliases retain normal precedence over functions, including built-in `cat` for `Get-Content`. Use `catp` for the bat helper, or explicitly override `cat` in your user file. ShellDeck does not remove your aliases to force its defaults into use.
+
+## PATH handling
+
+`Refresh-InstallerSessionPath` (PowerShell) reads Process, User, and Machine PATH, keeps process search order, and appends existing missing directories. It uses `System.Environment` with target `Process` only. `refresh_installer_session_path` (Bash) appends existing local-bin, Homebrew, and snap directories for tool discovery. Neither writes persistent PATH or prepends these directories; repeated refreshes avoid duplicate additions. Dry-run leaves even the process PATH unchanged.
+
+These refreshes let the installer find newly installed commands; they do not configure future terminals. Restart after installation to pick up the OS/package-manager environment. Package managers such as winget or the Homebrew installer can make their own environment changes, separately from ShellDeck's session refresh.
 
 ## Screenshots
 
@@ -16,34 +100,36 @@ ShellDeck installs a profile runtime that upgrades your terminal startup, keeps 
 
 ![ShellDeck infra dashboard](docs/screenshots/shelldeck-infra-dashboard.png)
 
-## One-command install
+## Install
+
+The download commands below use the `v0.2.4` release. Local installs use the bundled runtime.
 
 ### Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.3/install.ps1 -OutFile install.ps1
+irm https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.ps1 -OutFile install.ps1
 .\install.ps1
 ```
 
 ### Linux
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.3/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.sh
 bash install.sh
 ```
 
 ### macOS
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.3/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.sh
 bash install.sh
 ```
 
 To verify checksums first:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.3/install.sh
-curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.3/checksums.txt
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/install.sh
+curl -fsSLO https://raw.githubusercontent.com/adrienclaire/ShellDeck/v0.2.4/checksums.txt
 sha256sum -c --ignore-missing checksums.txt
 bash install.sh
 ```
@@ -60,7 +146,7 @@ bash install-macos.sh
 - Installs the shell runtime into `~/.shell-alias-tools`.
 - Hooks the runtime into your PowerShell, Bash, or Zsh profile.
 - Lets you choose a machine profile first: Control node for infra management, or Workstation for smart shell only.
-- Prints an `ENV READY` dashboard on shell startup with user, host, IP, disk, uptime, profile, and smart-tool status.
+- Can print a startup dashboard with user, host, IP, disk, uptime, profile, and CLI-tool status; it can be disabled.
 - Turns Bash into a smarter daily shell with clean shared history, Bash completion, fzf key bindings, a Starship prompt, modern file listing, pretty file reading, smart directory jumping, fuzzy file picking, archive extraction, port inspection, and safe fallbacks.
 - Installs or offers common CLI dependencies: `git`, `ssh`, `curl`, `wget`, `coreutils`, `gum`, `fzf`, `bash-completion`, `bat`, `eza`, `zoxide`, `starship`, `ripgrep`, `fd`, `jq`, `yq`, `nc`, `tree`, `unzip`, `zip`, `rsync`, `tmux`, `btop`, `htop`, `duf`, `neovim`, `gh`, `docker`, and `multipass` where supported.
 - On Linux installs, adds VM hardening helpers: `ufw` and `fail2ban`, with optional guided configuration.
@@ -135,17 +221,19 @@ The updater downloads and validates the runtime from `main`, backs up the instal
 To update from a specific release tag or branch:
 
 ```bash
-SHELLDECK_UPDATE_REF=v0.2.3 shelldeck-update
+SHELLDECK_UPDATE_REF=v0.2.4 shelldeck-update
 ```
 
 ```powershell
-$env:SHELLDECK_UPDATE_REF = "v0.2.3"
+$env:SHELLDECK_UPDATE_REF = "v0.2.4"
 shelldeck-update
 ```
 
 Rerunning the installer also preserves existing aliases and infra data. During uninstall, answer no when asked whether to delete the ShellDeck data directory if you intend to reinstall later.
 
 Alias helpers:
+
+Names already used by your shell or dotfiles retain their normal precedence over these defaults.
 
 ```text
 ll/la/l/lt    Modern directory listing with eza when available
@@ -183,7 +271,7 @@ shopt -s histappend cmdhist checkwinsize
 PROMPT_COMMAND='history -a; history -c; history -r'
 ```
 
-It sources `bash-completion` when installed, loads fzf key bindings and completion from common Linux and Homebrew paths, initializes zoxide, activates Starship when installed, and falls back to a compact colored prompt with Git branch awareness when Starship is unavailable. Existing custom aliases saved with `aa` still win.
+It sources `bash-completion` when installed, loads fzf key bindings and completion from common Linux and Homebrew paths, initializes zoxide, activates Starship when installed, and falls back to a compact colored prompt with Git branch awareness when Starship is unavailable. Custom aliases/functions and the separate user file take precedence. Set `SHELL_TOOLS_NO_PROMPT=1` to retain your Bash/Zsh prompt.
 
 The target VM tool belt is intentionally broad but still Bash-compatible: file navigation (`eza`, `zoxide`, `fd`, `ripgrep`, `fzf`), prompt/theme (`starship`), file reading/editing (`bat`, `neovim`), JSON/YAML (`jq`, `yq`), ops visibility (`btop`, `htop`, `duf`, `ports`), remote/dev basics (`ssh`, `rsync`, `tmux`, `gh`), and infra extras (`docker`, `multipass`) when you accept them.
 

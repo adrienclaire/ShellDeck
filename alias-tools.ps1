@@ -1,6 +1,17 @@
 # Shell Alias Tools - PowerShell profile runtime
 # Loaded from the user profile by install.ps1.
 
+# Preserve commands from the caller's profile; only our previous definitions are replaceable.
+$shellDeckPreservedFunctions = @{}
+$shellDeckStockPrompt = ([System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault2().Commands |
+    Where-Object { $_.Name -eq "prompt" }).Definition
+foreach ($entry in Get-ChildItem Function:) {
+    if ($entry.Name -eq "prompt" -and $entry.Definition -eq $shellDeckStockPrompt) { continue }
+    if ($script:ShellDeckDefaultFunctions -and $script:ShellDeckDefaultFunctions.ContainsKey($entry.Name) -and
+        $script:ShellDeckDefaultFunctions[$entry.Name] -eq $entry.Definition) { continue }
+    $shellDeckPreservedFunctions[$entry.Name] = $entry.ScriptBlock
+}
+
 $script:ShellToolsRoot = if ($env:SHELL_ALIAS_TOOLS_HOME) {
     $env:SHELL_ALIAS_TOOLS_HOME
 }
@@ -131,6 +142,7 @@ function Convert-ShellToolsInfraSchema {
     if ($normalizedHeader -ne "Name,HostName,User,Port,Role,CheckPorts,Url,SshEnabled") {
         return
     }
+    Copy-Item -LiteralPath $script:InfraHostsPath -Destination "$script:InfraHostsPath.bak.$(Get-Date -Format yyyyMMddHHmmssfff)"
 
     $records = @(Import-Csv -Path $script:InfraHostsPath | ForEach-Object {
         $services = if ($_.Url) { $_.Url } else { "" }
@@ -171,10 +183,6 @@ function Ensure-ShellToolsHome {
 }
 
 Ensure-ShellToolsHome
-
-if (Test-Path $script:AliasToolsPath) {
-    . $script:AliasToolsPath
-}
 
 function Read-ShellToolsDefault {
     param(
@@ -1161,8 +1169,9 @@ function shelldeck-update {
     $ref = if ($env:SHELLDECK_UPDATE_REF) { $env:SHELLDECK_UPDATE_REF } else { "main" }
     $runtimePath = Join-Path $script:ShellToolsRoot "shell-tools.ps1"
     $downloadPath = "{0}.update.{1}" -f $runtimePath, $PID
-    $backupPath = "{0}.bak.{1}" -f $runtimePath, (Get-Date -Format "yyyyMMddHHmmss")
+    $backupPath = "{0}.bak.{1}" -f $runtimePath, (Get-Date -Format "yyyyMMddHHmmssfff")
     $url = "https://raw.githubusercontent.com/adrienclaire/ShellDeck/$ref/alias-tools.ps1"
+    $runtimeReplaced = $false
 
     Write-Host ("Updating ShellDeck runtime from {0}..." -f $ref) -ForegroundColor Cyan
 
@@ -1186,6 +1195,7 @@ function shelldeck-update {
         }
 
         Move-Item -Path $downloadPath -Destination $runtimePath -Force
+        $runtimeReplaced = $true
         . $runtimePath
 
         Write-Host "ShellDeck updated successfully." -ForegroundColor Green
@@ -1197,7 +1207,12 @@ function shelldeck-update {
     catch {
         Remove-Item -Path $downloadPath -Force -ErrorAction SilentlyContinue
         Write-Host ("ShellDeck update failed: {0}" -f $_.Exception.Message) -ForegroundColor Red
-        Write-Host "The current installation and user data were not changed." -ForegroundColor Yellow
+        if ($runtimeReplaced) {
+            Write-Host "Runtime replaced, but reload failed. Inspect the error and restore the runtime backup if needed; user data was not deleted." -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "The current installation and user data were not changed." -ForegroundColor Yellow
+        }
     }
 }
 
@@ -1749,30 +1764,65 @@ if ($env:SHELL_TOOLS_NO_PROMPT -ne "1" -and -not $script:ShellToolsStarshipReady
     }
 }
 
-foreach ($shellToolsAlias in @("cat", "g", "gs", "ga", "gc", "gp", "gl", "gd", "ll", "la", "l", "lt", "dps", "dcu", "dcd", "dcl")) {
-    if (Test-Path "Alias:$shellToolsAlias") {
-        Remove-Item "Alias:$shellToolsAlias" -Force -ErrorAction SilentlyContinue
-    }
-}
-
-Set-Alias ep Edit-Profile -Scope Global -Force
-Set-Alias reloadp Reload-Profile -Scope Global -Force
-Set-Alias aa add-last-func -Scope Global -Force
-Set-Alias lf list-funcs -Scope Global -Force
-if (Test-ShellDeckControlProfile) {
-    Set-Alias shellsetup Initialize-ShellTools -Scope Global -Force
-}
-else {
+if (-not (Test-ShellDeckControlProfile)) {
     foreach ($infraCommand in @("init", "infra-add", "infra-edit", "infra-list", "sshhosts", "Initialize-ShellTools", "Add-InfraHost", "Edit-InfraHost", "Select-InfraHostName")) {
         if (Test-Path "Function:$infraCommand") {
             Remove-Item "Function:$infraCommand" -Force -ErrorAction SilentlyContinue
         }
+        $previousGlobal = Get-Item "Function:global:$infraCommand" -ErrorAction SilentlyContinue
+        if ($previousGlobal -and $script:ShellDeckDefaultFunctions -and
+            $script:ShellDeckDefaultFunctions.ContainsKey($infraCommand) -and
+            $previousGlobal.Definition -eq $script:ShellDeckDefaultFunctions[$infraCommand]) {
+            Remove-Item "Function:global:$infraCommand" -Force -ErrorAction SilentlyContinue
+        }
     }
 
-    if (Test-Path "Alias:shellsetup") {
+    if ((Get-Alias shellsetup -ErrorAction SilentlyContinue).Definition -eq "Initialize-ShellTools") {
         Remove-Item "Alias:shellsetup" -Force -ErrorAction SilentlyContinue
     }
 }
-Set-Alias myh myhelp -Scope Global -Force
+
+$script:ShellDeckDefaultFunctions = @{}
+foreach ($entry in Get-ChildItem Function:) {
+    if ($entry.ScriptBlock.File -eq $PSCommandPath -or $entry.Name -eq "prompt") {
+        $script:ShellDeckDefaultFunctions[$entry.Name] = $entry.Definition
+        if (-not $shellDeckPreservedFunctions.ContainsKey($entry.Name)) {
+            # Updates source the runtime inside a function; commands must survive that scope.
+            Set-Item -LiteralPath "Function:global:$($entry.Name)" -Value $entry.ScriptBlock
+        }
+    }
+}
+foreach ($name in $shellDeckPreservedFunctions.Keys) {
+    Set-Item -LiteralPath "Function:$name" -Value $shellDeckPreservedFunctions[$name]
+}
+
+$shellDeckAliases = @{ ep = "Edit-Profile"; reloadp = "Reload-Profile"; aa = "add-last-func"; lf = "list-funcs"; myh = "myhelp" }
+if (Test-ShellDeckControlProfile) { $shellDeckAliases.shellsetup = "Initialize-ShellTools" }
+foreach ($name in $shellDeckAliases.Keys) {
+    if ($shellDeckPreservedFunctions.ContainsKey($name) -and
+        (Get-Alias $name -ErrorAction SilentlyContinue).Definition -eq $shellDeckAliases[$name]) {
+        Remove-Item "Alias:$name" -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Test-Path "Alias:$name") -and -not (Test-Path "Function:$name")) {
+        Set-Alias -Name $name -Value $shellDeckAliases[$name] -Scope Global
+    }
+}
+
+# User code runs last, including overrides of ShellDeck commands and prompt.
+if (Test-Path $script:AliasToolsPath) {
+    . $script:AliasToolsPath
+    foreach ($entry in Get-ChildItem Function:) {
+        if ($entry.ScriptBlock.File -eq $script:AliasToolsPath) {
+            Set-Item -LiteralPath "Function:global:$($entry.Name)" -Value $entry.ScriptBlock
+        }
+    }
+}
+foreach ($name in $shellDeckAliases.Keys) {
+    if ((Test-Path "Function:$name") -and
+        (Get-Alias $name -ErrorAction SilentlyContinue).Definition -eq $shellDeckAliases[$name]) {
+        Remove-Item "Alias:$name" -Force -ErrorAction SilentlyContinue
+    }
+}
+Remove-Variable shellDeckPreservedFunctions, shellDeckStockPrompt, shellDeckAliases -ErrorAction SilentlyContinue
 
 Show-ShellDashboard
